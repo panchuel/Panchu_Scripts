@@ -1,140 +1,49 @@
---@description Renderizador SFX con jerarquía + GUI + Wildcards + Persistencia (Refactorizado)
---@version 9.0
+--@description Renderizador SFX con jerarquía + GUI + Wildcards + Persistencia + Renderizado Manual por Jerarquías
+--@version 2.1
 --@author Panchu
 --@provides [main] .
 
--- ============================================================================
--- CONFIGURACIÓN Y CONSTANTES
--- ============================================================================
+local reaper = reaper
+local ctx = reaper.ImGui_CreateContext('SFX Renderer v2.1')
+local font = reaper.ImGui_CreateFont('sans-serif', 16)
+reaper.ImGui_Attach(ctx, font)
 
-local Config = {
-    CONSTANTS = {
-        ORIGINAL_TAG = "SFX_ORIGINAL",
-        VARIATION_TAG = "SFX_VARIATION",
-        SCRIPT_NAME = "SFX Renderer",
-        VERSION = "9.0",
-        AUTHOR = "Daniel \"Panchuel\" Montoya"
-    },
-    
-    DEFAULT_SETTINGS = {
-        prefix = "sx",
-        prefix_type = "sx",
-        variations = 0,
-        separation_time = 1.0,
-        randomize_position = 0.0,
-        wildcard_template = "$region",
-        custom_output_path = "",
-        music_bpm = 120,
-        music_meter = "4-4",
-        dx_character = "",
-        dx_quest_type = "SQ",
-        dx_quest_name = "",
-        dx_line_number = 1,
-        volume_enable = false,
-        volume_amount = 3.0,
-        pan_enable = false,
-        pan_amount = 0.1,
-        pitch_enable = false,
-        pitch_amount = 0.5,
-        rate_enable = false,
-        rate_amount = 0.1,
-        length_enable = false,
-        length_amount = 0.1,
-        fadein_enable = false,
-        fadein_amount = 0.1,
-        fadeout_enable = false,
-        fadeout_amount = 0.1,
-        fadeshape_enable = false
-    },
-    
-    SLIDER_RANGES = {
-        volume = {min = 0.0, max = 12.0},
-        pan = {min = 0.0, max = 1.0},
-        pitch = {min = 0.0, max = 12.0},
-        rate = {min = 0.0, max = 0.5},
-        position = {min = 0.0, max = 5.0},
-        length = {min = 0.0, max = 0.5},
-        fadein = {min = 0.0, max = 1.0},
-        fadeout = {min = 0.0, max = 1.0}
-    },
-    
-    FILE_TYPES = {
-        SFX = {id = "sx", index = 0, folder = "SFX"},
-        MUSIC = {id = "mx", index = 1, folder = "Music"},
-        DIALOGUE = {id = "dx", index = 2, folder = "Dialogue"},
-        ENVIRONMENT = {id = "env", index = 3, folder = "Environment"}
-    }
+-- Valores predeterminados
+local default_settings = {
+    prefix = "sx",
+    prefix_type = "sx",
+    variations = 0,
+    separation_time = 1.0,
+    randomize_position = 0.0,
+    wildcard_template = "$region",
+    custom_output_path = "",
+    music_bpm = 120,
+    music_meter = "4-4",
+    dx_character = "",
+    dx_quest_type = "SQ",
+    dx_quest_name = "",
+    dx_line_number = 1,
+    volume_enable = false,
+    volume_amount = 3.0,
+    pan_enable = false,
+    pan_amount = 0.1,
+    pitch_enable = false,
+    pitch_amount = 0.5,
+    rate_enable = false,
+    rate_amount = 0.1,
+    length_enable = false,
+    length_amount = 0.1,
+    fadein_enable = false,
+    fadein_amount = 0.1,
+    fadeout_enable = false,
+    fadeout_amount = 0.1,
+    fadeshape_enable = false
 }
 
--- ============================================================================
--- UTILIDADES (Single Responsibility)
--- ============================================================================
-
-local Utils = {}
-
-function Utils.clean_name(name)
-    return name:gsub("[^%w_]", "_"):gsub("__+", "_")
-end
-
-function Utils.get_file_type_by_id(id)
-    for _, file_type in pairs(Config.FILE_TYPES) do
-        if file_type.id == id then
-            return file_type
-        end
-    end
-    return Config.FILE_TYPES.SFX
-end
-
-function Utils.get_file_type_by_index(index)
-    for _, file_type in pairs(Config.FILE_TYPES) do
-        if file_type.index == index then
-            return file_type
-        end
-    end
-    return Config.FILE_TYPES.SFX
-end
-
--- ============================================================================
--- INTERFACES (Interface Segregation Principle)
--- ============================================================================
-
--- Interface para persistencia
-local IPersistence = {}
-function IPersistence:load() error("Not implemented") end
-function IPersistence:save(data) error("Not implemented") end
-
--- Interface para gestión de tracks
-local ITrackManager = {}
-function ITrackManager:get_name(track) error("Not implemented") end
-function ITrackManager:get_parent_track(track) error("Not implemented") end
-function ITrackManager:get_child_tracks(track) error("Not implemented") end
-function ITrackManager:is_valid_subfolder(track) error("Not implemented") end
-
--- Interface para gestión de items
-local IItemManager = {}
-function IItemManager:is_original(item) error("Not implemented") end
-function IItemManager:is_variation(item) error("Not implemented") end
-function IItemManager:mark_as_original(item) error("Not implemented") end
-function IItemManager:mark_as_variation(item) error("Not implemented") end
-
--- Interface para procesamiento de regiones
-local IRegionProcessor = {}
-function IRegionProcessor:process_selected_tracks() error("Not implemented") end
-function IRegionProcessor:get_valid_tracks() error("Not implemented") end
-
--- ============================================================================
--- GESTIÓN DE CONFIGURACIÓN (Single Responsibility)
--- ============================================================================
-
-local SettingsManager = setmetatable({}, {__index = IPersistence})
-
-function SettingsManager:new()
-    return setmetatable({}, {__index = self})
-end
-
-function SettingsManager:load()
+-- Cargar configuración
+local function load_settings()
     local settings = {}
-    for key, default in pairs(Config.DEFAULT_SETTINGS) do
+    for key, default in pairs(default_settings) do
         local value = reaper.GetExtState("SFX_Renderer", key)
         if value ~= "" then
             if type(default) == "number" then
@@ -151,7 +60,8 @@ function SettingsManager:load()
     return settings
 end
 
-function SettingsManager:save(settings)
+-- Guardar configuración
+local function save_settings(settings)
     for key, value in pairs(settings) do
         if type(value) == "boolean" then
             reaper.SetExtState("SFX_Renderer", key, value and "true" or "false", true)
@@ -161,31 +71,85 @@ function SettingsManager:save(settings)
     end
 end
 
--- ============================================================================
--- GESTIÓN DE TRACKS (Single Responsibility)
--- ============================================================================
+-- Cargar configuración inicial
+local settings = load_settings()
 
-local TrackManager = setmetatable({}, {__index = ITrackManager})
+-- Variables globales
+local prefix = settings.prefix
+local prefix_type = settings.prefix_type
+local valid_tracks = {}
+local region_root_data = {}
+local region_parent_data = {}
+local variations = settings.variations
+local separation_time = settings.separation_time
+local randomize_position = settings.randomize_position
+local wildcard_template = settings.wildcard_template
+local custom_output_path = settings.custom_output_path
 
-function TrackManager:new()
-    return setmetatable({}, {__index = self})
+-- Configuración para tipos de archivo
+local music_bpm = settings.music_bpm
+local music_meter = settings.music_meter
+local dx_character = settings.dx_character
+local dx_quest_type = settings.dx_quest_type
+local dx_quest_name = settings.dx_quest_name
+local dx_line_number = settings.dx_line_number
+
+-- Parámetros de aleatorización para SFX
+local random_params = {
+    volume = {enable = settings.volume_enable, amount = settings.volume_amount},
+    pan = {enable = settings.pan_enable, amount = settings.pan_amount},
+    pitch = {enable = settings.pitch_enable, amount = settings.pitch_amount},
+    rate = {enable = settings.rate_enable, amount = settings.rate_amount},
+    position = {enable = true, amount = 0.0},
+    length = {enable = settings.length_enable, amount = settings.length_amount},
+    fadein = {enable = settings.fadein_enable, amount = settings.fadein_amount},
+    fadeout = {enable = settings.fadeout_enable, amount = settings.fadeout_amount},
+    fadeshape = {enable = settings.fadeshape_enable, amount = 1}
+}
+
+-- Rangos para los sliders
+local slider_ranges = {
+    volume = {min = 0.0, max = 12.0},
+    pan = {min = 0.0, max = 1.0},
+    pitch = {min = 0.0, max = 12.0},
+    rate = {min = 0.0, max = 0.5},
+    position = {min = 0.0, max = 5.0},
+    length = {min = 0.0, max = 0.5},
+    fadein = {min = 0.0, max = 1.0},
+    fadeout = {min = 0.0, max = 1.0}
+}
+
+-- Variables para renderizado manual por jerarquías
+local hierarchy_render_queue = {}
+local current_hierarchy_index = 1
+
+-- Constantes
+local ORIGINAL_TAG = "SFX_ORIGINAL"
+local VARIATION_TAG = "SFX_VARIATION"
+
+-- ==================================================
+-- Funciones auxiliares (mantener originales)
+-- ==================================================
+
+local function clean_name(name)
+    return name:gsub("[^%w_]", "_"):gsub("__+", "_")
 end
 
-function TrackManager:get_name(track)
+local function get_track_name(track)
     local _, name = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
     return name or "Unnamed"
 end
 
-function TrackManager:get_index(track)
+local function get_track_index(track)
     return reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER") - 1
 end
 
-function TrackManager:get_folder_depth(track)
+local function get_folder_depth(track)
     return reaper.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH")
 end
 
-function TrackManager:get_parent_track(track)
-    local idx = self:get_index(track)
+local function get_parent_track(track)
+    local idx = get_track_index(track)
     if idx == 0 then return nil end
     
     local current_level = 0
@@ -212,14 +176,14 @@ function TrackManager:get_parent_track(track)
     return nil
 end
 
-function TrackManager:get_child_tracks(folder_track)
+local function get_child_tracks(folder_track)
     local child_tracks = {}
-    local folder_idx = self:get_index(folder_track)
+    local folder_idx = get_track_index(folder_track)
     local total_tracks = reaper.CountTracks(0)
     
     for i = folder_idx + 1, total_tracks - 1 do
         local track = reaper.GetTrack(0, i)
-        local depth = self:get_folder_depth(track)
+        local depth = get_folder_depth(track)
         table.insert(child_tracks, track)
         if depth < 0 then break end
     end
@@ -227,183 +191,90 @@ function TrackManager:get_child_tracks(folder_track)
     return child_tracks
 end
 
-function TrackManager:is_valid_subfolder(track)
-    if self:get_folder_depth(track) ~= 1 then return false end
-    local child_tracks = self:get_child_tracks(track)
-    return #child_tracks > 0
-end
-
--- ============================================================================
--- GESTIÓN DE ITEMS (Single Responsibility)
--- ============================================================================
-
-local ItemManager = setmetatable({}, {__index = IItemManager})
-
-function ItemManager:new()
-    return setmetatable({}, {__index = self})
-end
-
-function ItemManager:get_notes(item)
+local function get_item_notes(item)
     local _, notes = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
     return notes or ""
 end
 
-function ItemManager:set_notes(item, notes)
+local function set_item_notes(item, notes)
     reaper.GetSetMediaItemInfo_String(item, "P_NOTES", notes, true)
 end
 
-function ItemManager:is_original(item)
-    local notes = self:get_notes(item)
-    return notes:find(Config.CONSTANTS.ORIGINAL_TAG) and not notes:find(Config.CONSTANTS.VARIATION_TAG)
+local function is_original_item(item)
+    local notes = get_item_notes(item)
+    return notes:find(ORIGINAL_TAG) and not notes:find(VARIATION_TAG)
 end
 
-function ItemManager:is_variation(item)
-    local notes = self:get_notes(item)
-    return notes:find(Config.CONSTANTS.VARIATION_TAG)
+local function is_variation_item(item)
+    local notes = get_item_notes(item)
+    return notes:find(VARIATION_TAG)
 end
 
-function ItemManager:mark_as_original(item)
-    if not self:is_original(item) and not self:is_variation(item) then
-        local current_notes = self:get_notes(item)
-        self:set_notes(item, current_notes .. " " .. Config.CONSTANTS.ORIGINAL_TAG)
-    end
-end
-
-function ItemManager:mark_as_variation(item)
-    self:set_notes(item, Config.CONSTANTS.VARIATION_TAG)
-end
-
--- ============================================================================
--- ESTRATEGIAS DE NAMING (Strategy Pattern)
--- ============================================================================
-
-local INamingStrategy = {}
-function INamingStrategy:build_name(root_name, sub_name, settings) error("Not implemented") end
-
-local SFXNamingStrategy = setmetatable({}, {__index = INamingStrategy})
-function SFXNamingStrategy:build_name(root_name, sub_name, settings)
-    return string.format("%s_%s_%s", settings.prefix, root_name, sub_name)
-end
-
-local MusicNamingStrategy = setmetatable({}, {__index = INamingStrategy})
-function MusicNamingStrategy:build_name(root_name, sub_name, settings)
-    return string.format("mx_%s_%s_%d_%s", 
-        root_name, sub_name, settings.music_bpm, settings.music_meter)
-end
-
-local DialogueNamingStrategy = setmetatable({}, {__index = INamingStrategy})
-function DialogueNamingStrategy:build_name(root_name, sub_name, settings)
-    local char_field = settings.dx_character ~= "" and settings.dx_character or "unknown"
-    local questType_field = settings.dx_quest_type ~= "" and settings.dx_quest_type or "SQ"
-    local questName_field = settings.dx_quest_name ~= "" and settings.dx_quest_name or sub_name
-    return string.format("dx_%s_%s_%s_%02d", 
-        char_field, questType_field, questName_field, settings.dx_line_number)
-end
-
-local EnvironmentNamingStrategy = setmetatable({}, {__index = INamingStrategy})
-function EnvironmentNamingStrategy:build_name(root_name, sub_name, settings)
-    return string.format("env_%s_%s", root_name, sub_name)
-end
-
--- Factory para estrategias de naming
-local NamingStrategyFactory = {}
-function NamingStrategyFactory.create(file_type)
-    local strategies = {
-        sx = SFXNamingStrategy,
-        mx = MusicNamingStrategy,
-        dx = DialogueNamingStrategy,
-        env = EnvironmentNamingStrategy
-    }
-    return strategies[file_type] or SFXNamingStrategy
-end
-
--- ============================================================================
--- GESTIÓN DE PARÁMETROS ALEATORIOS (Single Responsibility)
--- ============================================================================
-
-local RandomizationManager = {}
-
-function RandomizationManager:new()
-    return setmetatable({}, {__index = self})
-end
-
-function RandomizationManager:apply_to_item(new_item, new_take, original_item, original_take, random_params)
-    local appliers = {
-        {param = "volume", func = self._apply_volume},
-        {param = "pan", func = self._apply_pan},
-        {param = "pitch", func = self._apply_pitch},
-        {param = "rate", func = self._apply_rate},
-        {param = "length", func = self._apply_length},
-        {param = "fadein", func = self._apply_fadein},
-        {param = "fadeout", func = self._apply_fadeout},
-        {param = "fadeshape", func = self._apply_fadeshape}
-    }
-    
-    for _, applier in ipairs(appliers) do
-        if random_params[applier.param] and random_params[applier.param].enable then
-            applier.func(self, new_item, new_take, random_params[applier.param].amount)
+local function mark_original_items(folder_track)
+    local child_tracks = get_child_tracks(folder_track)
+    for _, child in ipairs(child_tracks) do
+        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
+            local item = reaper.GetTrackMediaItem(child, k)
+            
+            if not is_original_item(item) and not is_variation_item(item) then
+                local current_notes = get_item_notes(item)
+                set_item_notes(item, current_notes .. " " .. ORIGINAL_TAG)
+            end
         end
     end
 end
 
-function RandomizationManager:_apply_volume(new_item, new_take, amount)
-    if amount > 0 then
-        local vol_db = (math.random() * 2 - 1) * amount
+local function is_valid_subfolder(track)
+    if get_folder_depth(track) ~= 1 then return false end
+    local child_tracks = get_child_tracks(track)
+    return #child_tracks > 0
+end
+
+-- Aplicar parámetros aleatorizados a un nuevo item (mantener función original)
+local function apply_random_parameters(new_item, new_take, original_item, original_take)
+    if random_params.volume.enable and random_params.volume.amount > 0 then
+        local vol_db = (math.random() * 2 - 1) * random_params.volume.amount
         local vol_linear = 10^(vol_db / 20)
         reaper.SetMediaItemTakeInfo_Value(new_take, "D_VOL", vol_linear)
     end
-end
-
-function RandomizationManager:_apply_pan(new_item, new_take, amount)
-    if amount > 0 then
-        local pan_val = (math.random() * 2 - 1) * amount
+    
+    if random_params.pan.enable and random_params.pan.amount > 0 then
+        local pan_val = (math.random() * 2 - 1) * random_params.pan.amount
         reaper.SetMediaItemTakeInfo_Value(new_take, "D_PAN", pan_val)
     end
-end
-
-function RandomizationManager:_apply_pitch(new_item, new_take, amount)
-    if amount > 0 then
-        local pitch_offset = (math.random() * 2 - 1) * amount
+    
+    if random_params.pitch.enable and random_params.pitch.amount > 0 then
+        local pitch_offset = (math.random() * 2 - 1) * random_params.pitch.amount
         reaper.SetMediaItemTakeInfo_Value(new_take, "D_PITCH", pitch_offset)
     end
-end
-
-function RandomizationManager:_apply_rate(new_item, new_take, amount)
-    if amount > 0 then
-        local rate_factor = 1.0 + (math.random() * 2 - 1) * amount
+    
+    if random_params.rate.enable and random_params.rate.amount > 0 then
+        local rate_factor = 1.0 + (math.random() * 2 - 1) * random_params.rate.amount
         reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", rate_factor)
         
         local length = reaper.GetMediaItemInfo_Value(new_item, "D_LENGTH")
         reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", length / rate_factor)
     end
-end
-
-function RandomizationManager:_apply_length(new_item, new_take, amount)
-    if amount > 0 then
-        local length_factor = 1.0 + (math.random() * 2 - 1) * amount
+    
+    if random_params.length.enable and random_params.length.amount > 0 then
+        local length_factor = 1.0 + (math.random() * 2 - 1) * random_params.length.amount
         local length = reaper.GetMediaItemInfo_Value(new_item, "D_LENGTH")
         reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", length * length_factor)
     end
-end
-
-function RandomizationManager:_apply_fadein(new_item, new_take, amount)
-    if amount > 0 then
+    
+    if random_params.fadein.enable and random_params.fadein.amount > 0 then
         local fadein_len = reaper.GetMediaItemInfo_Value(new_item, "D_FADEINLEN")
-        local fadein_factor = 1.0 + (math.random() * 2 - 1) * amount
+        local fadein_factor = 1.0 + (math.random() * 2 - 1) * random_params.fadein.amount
         reaper.SetMediaItemInfo_Value(new_item, "D_FADEINLEN", fadein_len * fadein_factor)
     end
-end
-
-function RandomizationManager:_apply_fadeout(new_item, new_take, amount)
-    if amount > 0 then
+    
+    if random_params.fadeout.enable and random_params.fadeout.amount > 0 then
         local fadeout_len = reaper.GetMediaItemInfo_Value(new_item, "D_FADEOUTLEN")
-        local fadeout_factor = 1.0 + (math.random() * 2 - 1) * amount
+        local fadeout_factor = 1.0 + (math.random() * 2 - 1) * random_params.fadeout.amount
         reaper.SetMediaItemInfo_Value(new_item, "D_FADEOUTLEN", fadeout_len * fadeout_factor)
     end
-end
-
-function RandomizationManager:_apply_fadeshape(new_item, new_take, amount)
-    if amount > 0 then
+    
+    if random_params.fadeshape.enable and random_params.fadeshape.amount > 0 then
         local shapes = {0, 1, 2, 3}
         local new_shape = shapes[math.random(1, #shapes)]
         reaper.SetMediaItemInfo_Value(new_item, "C_FADEINSHAPE", new_shape)
@@ -411,28 +282,222 @@ function RandomizationManager:_apply_fadeshape(new_item, new_take, amount)
     end
 end
 
--- ============================================================================
--- GESTIÓN DE REGIONES (Single Responsibility)
--- ============================================================================
+-- ==================================================
+-- NUEVAS FUNCIONES PARA RENDERIZADO MANUAL POR JERARQUÍAS
+-- ==================================================
 
-local RegionManager = {}
+-- ==================================================
+-- NUEVAS FUNCIONES PARA TRABAJAR CON REGIONES EXISTENTES
+-- ==================================================
 
-function RegionManager:new()
-    return setmetatable({}, {__index = self})
-end
-
-function RegionManager:get_selected()
-    local _, region_index = reaper.GetLastMarkerAndCurRegion(0, reaper.GetCursorPosition())
-    if region_index >= 0 then
-        local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(region_index)
+-- Extraer información jerárquica de nombres de regiones existentes
+local function extract_hierarchy_from_region_names()
+    local regions = {}
+    local marker_count = reaper.CountProjectMarkers(0)
+    local extracted_count = 0
+    
+    -- Obtener todas las regiones
+    for i = 0, marker_count - 1 do
+        local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(i)
         if isrgn then
-            return {name = name, start = pos, end_pos = rgnend}
+            table.insert(regions, {
+                name = name,
+                start = pos,
+                end_pos = rgnend
+            })
         end
     end
-    return nil
+    
+    if #regions == 0 then
+        reaper.ShowMessageBox("No hay regiones en el proyecto.", "Sin Regiones", 0)
+        return 0
+    end
+    
+    -- Intentar extraer información jerárquica de los nombres
+    for _, region in ipairs(regions) do
+        local name = region.name
+        local root, parent = nil, nil
+        
+        -- Patrón para SFX: sx_root_parent_number o prefix_root_parent_number
+        root, parent = name:match("^%w+_([^_]+)_([^_]+)_%d+$")
+        
+        if root and parent then
+            region_root_data[name] = root
+            region_parent_data[name] = parent
+            extracted_count = extracted_count + 1
+        else
+            -- Si no se puede extraer, marcar como desconocido
+            region_root_data[name] = "Unknown"
+            region_parent_data[name] = "Unknown"
+        end
+    end
+    
+    return extracted_count
 end
 
-function RegionManager:get_all()
+-- Migrar regiones existentes para que funcionen con el nuevo sistema
+local function migrate_existing_regions()
+    local migration_message = "🔄 MIGRACIÓN DE REGIONES EXISTENTES 🔄\n\n"
+    migration_message = migration_message .. "Este proceso intentará extraer información jerárquica\n"
+    migration_message = migration_message .. "de los nombres de las regiones existentes.\n\n"
+    migration_message = migration_message .. "Funciona mejor con regiones que sigan el patrón:\n"
+    migration_message = migration_message .. "prefix_root_parent_number\n"
+    migration_message = migration_message .. "(ej: sx_FootSteps_Dirt_01)\n\n"
+    migration_message = migration_message .. "¿Continuar con la migración?"
+    
+    local result = reaper.ShowMessageBox(migration_message, "Migrar Regiones", 1)
+    if result ~= 1 then return end
+    
+    local extracted_count = extract_hierarchy_from_region_names()
+    local marker_count = reaper.CountProjectMarkers(0)
+    local region_count = 0
+    
+    -- Contar regiones totales
+    for i = 0, marker_count - 1 do
+        local _, isrgn, _, _, _, _ = reaper.EnumProjectMarkers(i)
+        if isrgn then
+            region_count = region_count + 1
+        end
+    end
+    
+    local result_message = "📊 RESULTADO DE LA MIGRACIÓN 📊\n\n"
+    result_message = result_message .. string.format("Regiones totales: %d\n", region_count)
+    result_message = result_message .. string.format("Jerarquías extraídas: %d\n", extracted_count)
+    result_message = result_message .. string.format("Sin información: %d\n\n", region_count - extracted_count)
+    
+    if extracted_count > 0 then
+        result_message = result_message .. "✅ Migración exitosa!\n"
+        result_message = result_message .. "Ahora puedes usar las funciones de jerarquía.\n\n"
+        result_message = result_message .. "Usa '🔍 Analyze Hierarchies' para ver los resultados."
+    else
+        result_message = result_message .. "❌ No se pudo extraer información jerárquica.\n\n"
+        result_message = result_message .. "POSIBLES SOLUCIONES:\n"
+        result_message = result_message .. "1. Recrear regiones con 'Create regions'\n"
+        result_message = result_message .. "2. Usar migración manual (siguiente opción)\n"
+        result_message = result_message .. "3. Usar renderizado normal sin jerarquías"
+    end
+    
+    reaper.ShowMessageBox(result_message, "Resultado de Migración", 0)
+end
+
+-- Migración manual para regiones que no siguen el patrón estándar
+local function manual_region_migration()
+    local regions = {}
+    local marker_count = reaper.CountProjectMarkers(0)
+    
+    -- Obtener todas las regiones
+    for i = 0, marker_count - 1 do
+        local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(i)
+        if isrgn then
+            table.insert(regions, {
+                name = name,
+                start = pos,
+                end_pos = rgnend
+            })
+        end
+    end
+    
+    if #regions == 0 then
+        reaper.ShowMessageBox("No hay regiones en el proyecto.", "Sin Regiones", 0)
+        return
+    end
+    
+    local manual_message = "🔧 MIGRACIÓN MANUAL 🔧\n\n"
+    manual_message = manual_message .. "Para cada región, ingresa manualmente:\n"
+    manual_message = manual_message .. "• Root (carpeta padre)\n"
+    manual_message = manual_message .. "• Parent (subcarpeta)\n\n"
+    manual_message = manual_message .. string.format("Se procesarán %d regiones.\n\n", #regions)
+    manual_message = manual_message .. "Formato de entrada: root,parent\n"
+    manual_message = manual_message .. "Ejemplo: FootSteps,Dirt\n\n"
+    manual_message = manual_message .. "¿Continuar?"
+    
+    local result = reaper.ShowMessageBox(manual_message, "Migración Manual", 1)
+    if result ~= 1 then return end
+    
+    local migrated_count = 0
+    
+    for i, region in ipairs(regions) do
+        local prompt = string.format("Región %d de %d:\n%s\n\nIngresa: root,parent", i, #regions, region.name)
+        
+        local retval, user_input = reaper.GetUserInputs("Migración Manual", 1, "root,parent:", "")
+        
+        if retval and user_input ~= "" then
+            local root, parent = user_input:match("([^,]+),([^,]+)")
+            if root and parent then
+                -- Limpiar espacios
+                root = root:match("^%s*(.-)%s*$")
+                parent = parent:match("^%s*(.-)%s*$")
+                
+                region_root_data[region.name] = root
+                region_parent_data[region.name] = parent
+                migrated_count = migrated_count + 1
+            else
+                reaper.ShowMessageBox("Formato incorrecto. Saltando región: " .. region.name, "Error de Formato", 0)
+            end
+        else
+            -- Usuario canceló o saltó
+            break
+        end
+    end
+    
+    local final_message = string.format("✅ Migración manual completada!\n\nRegiones migradas: %d de %d\n\nAhora puedes usar las funciones de jerarquía.", migrated_count, #regions)
+    reaper.ShowMessageBox(final_message, "Migración Completada", 0)
+end
+
+-- Verificar si las regiones actuales tienen información jerárquica
+local function check_hierarchy_data_status()
+    local regions = {}
+    local marker_count = reaper.CountProjectMarkers(0)
+    
+    for i = 0, marker_count - 1 do
+        local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(i)
+        if isrgn then
+            table.insert(regions, {name = name})
+        end
+    end
+    
+    if #regions == 0 then
+        reaper.ShowMessageBox("No hay regiones en el proyecto.", "Sin Regiones", 0)
+        return
+    end
+    
+    local with_data = 0
+    local without_data = 0
+    
+    for _, region in ipairs(regions) do
+        if region_root_data[region.name] and region_parent_data[region.name] and
+           region_root_data[region.name] ~= "" and region_parent_data[region.name] ~= "" then
+            with_data = with_data + 1
+        else
+            without_data = without_data + 1
+        end
+    end
+    
+    local status_message = "📊 ESTADO DE INFORMACIÓN JERÁRQUICA 📊\n\n"
+    status_message = status_message .. string.format("Regiones totales: %d\n", #regions)
+    status_message = status_message .. string.format("Con información jerárquica: %d\n", with_data)
+    status_message = status_message .. string.format("Sin información jerárquica: %d\n\n", without_data)
+    
+    if with_data == #regions then
+        status_message = status_message .. "✅ Todas las regiones tienen información jerárquica.\n"
+        status_message = status_message .. "Puedes usar todas las funciones de jerarquía."
+    elseif with_data > 0 then
+        status_message = status_message .. "⚠️  Información jerárquica parcial.\n"
+        status_message = status_message .. "Algunas funciones pueden no trabajar correctamente.\n\n"
+        status_message = status_message .. "RECOMENDACIÓN: Migrar regiones restantes."
+    else
+        status_message = status_message .. "❌ Ninguna región tiene información jerárquica.\n\n"
+        status_message = status_message .. "SOLUCIONES:\n"
+        status_message = status_message .. "1. Usar 'Migrate Existing Regions'\n"
+        status_message = status_message .. "2. Recrear regiones con 'Create regions'\n"
+        status_message = status_message .. "3. Usar renderizado normal"
+    end
+    
+    reaper.ShowMessageBox(status_message, "Estado de Información", 0)
+end
+
+-- Función mejorada de análisis que maneja regiones sin información
+local function analyze_hierarchies_safe()
     local regions = {}
     local marker_count = reaper.CountProjectMarkers(0)
     
@@ -447,10 +512,367 @@ function RegionManager:get_all()
         end
     end
     
-    return regions
+    if #regions == 0 then
+        reaper.ShowMessageBox("No hay regiones en el proyecto.", "Sin Regiones", 0)
+        return {}
+    end
+    
+    -- Verificar si hay información jerárquica
+    local has_hierarchy_data = false
+    for _, region in ipairs(regions) do
+        if region_root_data[region.name] and region_parent_data[region.name] and
+           region_root_data[region.name] ~= "" and region_parent_data[region.name] ~= "" then
+            has_hierarchy_data = true
+            break
+        end
+    end
+    
+    if not has_hierarchy_data then
+        local no_data_message = "❌ SIN INFORMACIÓN JERÁRQUICA ❌\n\n"
+        no_data_message = no_data_message .. "Las regiones existentes no tienen información\n"
+        no_data_message = no_data_message .. "jerárquica necesaria para el análisis.\n\n"
+        no_data_message = no_data_message .. "SOLUCIONES DISPONIBLES:\n\n"
+        no_data_message = no_data_message .. "1️⃣ MIGRACIÓN AUTOMÁTICA\n"
+        no_data_message = no_data_message .. "   • Usar 'Migrate Existing Regions'\n"
+        no_data_message = no_data_message .. "   • Extrae info de nombres de regiones\n\n"
+        no_data_message = no_data_message .. "2️⃣ MIGRACIÓN MANUAL\n"
+        no_data_message = no_data_message .. "   • Usar 'Manual Migration'\n"
+        no_data_message = no_data_message .. "   • Ingresar root,parent manualmente\n\n"
+        no_data_message = no_data_message .. "3️⃣ RECREAR REGIONES\n"
+        no_data_message = no_data_message .. "   • Seleccionar subcarpetas originales\n"
+        no_data_message = no_data_message .. "   • Usar 'Create regions' nuevamente\n\n"
+        no_data_message = no_data_message .. "¿Quieres intentar migración automática ahora?"
+        
+        local result = reaper.ShowMessageBox(no_data_message, "Sin Información Jerárquica", 1)
+        if result == 1 then
+            migrate_existing_regions()
+        end
+        return {}
+    end
+    
+    -- Proceder con análisis normal
+    local hierarchies = {}
+    
+    for _, region in ipairs(regions) do
+        local root = region_root_data[region.name] or "Unknown"
+        local parent = region_parent_data[region.name] or "Unknown"
+        local hierarchy_key = root .. "|" .. parent
+        
+        if not hierarchies[hierarchy_key] then
+            hierarchies[hierarchy_key] = {
+                root = root,
+                parent = parent,
+                regions = {},
+                display_name = root .. " > " .. parent
+            }
+        end
+        
+        table.insert(hierarchies[hierarchy_key].regions, region)
+    end
+    
+    local hierarchy_list = {}
+    for _, hierarchy in pairs(hierarchies) do
+        table.insert(hierarchy_list, hierarchy)
+    end
+    
+    return hierarchy_list
 end
 
-function RegionManager:find_max_variation_number(base_name)
+-- Mostrar análisis de jerarquías (actualizado para usar función segura)
+local function show_hierarchy_analysis()
+    local hierarchies = analyze_hierarchies_safe()
+    
+    if #hierarchies == 0 then
+        return
+    end
+    
+    local analysis_message = "📊 ANÁLISIS DE JERARQUÍAS 📊\n\n"
+    analysis_message = analysis_message .. string.format("Total de jerarquías: %d\n\n", #hierarchies)
+    
+    for i, hierarchy in ipairs(hierarchies) do
+        analysis_message = analysis_message .. string.format("%d. %s\n", i, hierarchy.display_name)
+        analysis_message = analysis_message .. string.format("   Regiones: %d\n", #hierarchy.regions)
+        
+        -- Mostrar primeras 3 regiones
+        for j, region in ipairs(hierarchy.regions) do
+            if j <= 3 then
+                analysis_message = analysis_message .. string.format("   • %s\n", region.name)
+            elseif j == 4 then
+                analysis_message = analysis_message .. string.format("   • ... y %d más\n", #hierarchy.regions - 3)
+                break
+            end
+        end
+        analysis_message = analysis_message .. "\n"
+    end
+    
+    if #hierarchies > 1 then
+        analysis_message = analysis_message .. "🎯 RECOMENDACIÓN: Usar renderizado manual por jerarquías\n"
+        analysis_message = analysis_message .. "para evitar que todos los archivos se guarden en la misma carpeta."
+    else
+        analysis_message = analysis_message .. "✅ Una sola jerarquía detectada.\n"
+        analysis_message = analysis_message .. "El renderizado normal funcionará correctamente."
+    end
+    
+    reaper.ShowMessageBox(analysis_message, "Análisis de Jerarquías", 0)
+end
+
+-- Preparar cola de renderizado por jerarquías (actualizado)
+local function prepare_hierarchy_render_queue()
+    local hierarchies = analyze_hierarchies_safe()
+    
+    if #hierarchies == 0 then
+        return false
+    end
+    
+    if #hierarchies == 1 then
+        local single_msg = "Solo hay una jerarquía detectada.\n\n"
+        single_msg = single_msg .. "¿Quieres usar renderizado normal en su lugar?\n"
+        single_msg = single_msg .. "(Recomendado para una sola jerarquía)"
+        
+        local result = reaper.ShowMessageBox(single_msg, "Una Sola Jerarquía", 4) -- Yes/No
+        if result == 6 then -- Yes
+            return false
+        end
+    end
+    
+    -- Mostrar información de la cola
+    local queue_message = "🎯 RENDERIZADO MANUAL POR JERARQUÍAS 🎯\n\n"
+    queue_message = queue_message .. string.format("Se configurarán %d jerarquías para renderizado:\n\n", #hierarchies)
+    
+    for i, hierarchy in ipairs(hierarchies) do
+        queue_message = queue_message .. string.format("%d. %s (%d regiones)\n", i, hierarchy.display_name, #hierarchy.regions)
+    end
+    
+    queue_message = queue_message .. "\n📋 PROCESO:\n"
+    queue_message = queue_message .. "1. Se configurará cada jerarquía individualmente\n"
+    queue_message = queue_message .. "2. Cada una tendrá su ruta y patrón específico\n"
+    queue_message = queue_message .. "3. Renderizas manualmente una por una\n"
+    queue_message = queue_message .. "4. Garantiza archivos en carpetas correctas\n\n"
+    queue_message = queue_message .. "¿Iniciar el proceso?"
+    
+    local result = reaper.ShowMessageBox(queue_message, "Confirmar Renderizado por Jerarquías", 1) -- OK/Cancel
+    if result ~= 1 then
+        return false
+    end
+    
+    -- Guardar cola de renderizado
+    hierarchy_render_queue = hierarchies
+    current_hierarchy_index = 1
+    
+    return true
+end
+
+-- Configurar REAPER para renderizar la siguiente jerarquía
+local function setup_next_hierarchy_render()
+    if #hierarchy_render_queue == 0 then
+        reaper.ShowMessageBox("No hay jerarquías en la cola de renderizado.", "Cola Vacía", 0)
+        return false
+    end
+    
+    if current_hierarchy_index > #hierarchy_render_queue then
+        reaper.ShowMessageBox("🎉 Todas las jerarquías han sido procesadas!", "Renderizado Completado", 0)
+        hierarchy_render_queue = {}
+        current_hierarchy_index = 1
+        return false
+    end
+    
+    local hierarchy = hierarchy_render_queue[current_hierarchy_index]
+    
+    -- Construir ruta de salida para esta jerarquía
+    local base_path = custom_output_path ~= "" and custom_output_path or reaper.GetProjectPath("") .. "/Renders/"
+    
+    -- Añadir carpeta de tipo
+    local type_folder = "SFX"
+    if prefix_type == "mx" then type_folder = "Music"
+    elseif prefix_type == "dx" then type_folder = "Dialogue"
+    elseif prefix_type == "env" then type_folder = "Environment" end
+    
+    local hierarchy_path = base_path .. type_folder .. "/"
+    
+    -- Añadir carpeta de root
+    local clean_root = hierarchy.root == "Root" and "General" or clean_name(hierarchy.root)
+    hierarchy_path = hierarchy_path .. clean_root .. "/"
+    
+    -- Añadir carpeta de parent
+    hierarchy_path = hierarchy_path .. clean_name(hierarchy.parent) .. "/"
+    
+    -- Crear directorios si no existen
+    reaper.RecursiveCreateDirectory(hierarchy_path, 0)
+    
+    -- Configurar REAPER
+    reaper.GetSetProjectInfo_String(0, "RENDER_FILE", hierarchy_path, true)
+    
+    -- Expandir wildcards para esta jerarquía específica
+    local expanded_pattern = wildcard_template
+        :gsub("%$root", hierarchy.root)
+        :gsub("%$parent", hierarchy.parent)
+    
+    reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", expanded_pattern, true)
+    reaper.GetSetProjectInfo_String(0, "RENDER_BOUNDSFLAG", "1", true) -- Regiones
+    reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "wav", true)
+    reaper.GetSetProjectInfo_String(0, "RENDER_SETTINGS", "24bit", true)
+    
+    -- Mostrar información de configuración
+    local config_message = string.format("✅ JERARQUÍA %d de %d CONFIGURADA ✅\n\n", current_hierarchy_index, #hierarchy_render_queue)
+    config_message = config_message .. string.format("Jerarquía: %s\n", hierarchy.display_name)
+    config_message = config_message .. string.format("Carpeta: %s\n", hierarchy_path)
+    config_message = config_message .. string.format("Patrón: %s\n", expanded_pattern)
+    config_message = config_message .. string.format("Regiones: %d\n\n", #hierarchy.regions)
+    
+    config_message = config_message .. "REGIONES A RENDERIZAR:\n"
+    for i, region in ipairs(hierarchy.regions) do
+        if i <= 5 then
+            config_message = config_message .. string.format("• %s\n", region.name)
+        elseif i == 6 then
+            config_message = config_message .. string.format("• ... y %d más\n", #hierarchy.regions - 5)
+            break
+        end
+    end
+    
+    config_message = config_message .. "\n💡 IMPORTANTE:\n"
+    config_message = config_message .. "• Se abrirá el diálogo de render\n"
+    config_message = config_message .. "• Verifica que 'Regiones/marcadores' esté seleccionado\n"
+    config_message = config_message .. "• Renderiza solo esta jerarquía\n"
+    config_message = config_message .. "• Luego usa 'Siguiente Jerarquía' para continuar\n\n"
+    config_message = config_message .. "¿Abrir diálogo de render?"
+    
+    local result = reaper.ShowMessageBox(config_message, "Jerarquía Configurada", 1) -- OK/Cancel
+    if result == 1 then
+        -- Incrementar índice para la próxima jerarquía
+        current_hierarchy_index = current_hierarchy_index + 1
+        
+        -- Abrir diálogo de render
+        reaper.Main_OnCommand(40015, 0)
+        return true
+    end
+    
+    return false
+end
+
+-- Mostrar estado de la cola de renderizado
+local function show_render_queue_status()
+    if #hierarchy_render_queue == 0 then
+        reaper.ShowMessageBox("No hay cola de renderizado activa.\nUsa 'Preparar Renderizado por Jerarquías' primero.", "Sin Cola", 0)
+        return
+    end
+    
+    local status_message = "📋 ESTADO DE LA COLA DE RENDERIZADO 📋\n\n"
+    status_message = status_message .. string.format("Progreso: %d de %d jerarquías\n\n", current_hierarchy_index - 1, #hierarchy_render_queue)
+    
+    for i, hierarchy in ipairs(hierarchy_render_queue) do
+        local status_icon = "⏳"
+        if i < current_hierarchy_index then
+            status_icon = "✅"
+        elseif i == current_hierarchy_index then
+            status_icon = "▶️"
+        end
+        
+        status_message = status_message .. string.format("%s %d. %s (%d regiones)\n", 
+            status_icon, i, hierarchy.display_name, #hierarchy.regions)
+    end
+    
+    status_message = status_message .. "\n📌 LEYENDA:\n"
+    status_message = status_message .. "✅ Configurado y listo\n"
+    status_message = status_message .. "▶️ Siguiente a configurar\n"
+    status_message = status_message .. "⏳ Pendiente\n"
+    
+    if current_hierarchy_index <= #hierarchy_render_queue then
+        status_message = status_message .. "\n🎯 Usa 'Siguiente Jerarquía' para continuar."
+    else
+        status_message = status_message .. "\n🎉 ¡Todas las jerarquías completadas!"
+    end
+    
+    reaper.ShowMessageBox(status_message, "Estado de la Cola", 0)
+end
+
+-- ==================================================
+-- Funciones principales (mantener originales)
+-- ==================================================
+
+local function calculate_folder_time_range(folder_track)
+    local min_start = math.huge
+    local max_end = 0
+    local child_tracks = get_child_tracks(folder_track)
+    
+    for _, child in ipairs(child_tracks) do
+        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
+            local item = reaper.GetTrackMediaItem(child, k)
+            if is_original_item(item) then
+                local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+                local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+                local end_pos = pos + len
+                
+                min_start = math.min(min_start, pos)
+                max_end = math.max(max_end, end_pos)
+            end
+        end
+    end
+    
+    return min_start, max_end
+end
+
+local function duplicate_original_items(folder_track, total_offset)
+    local child_tracks = get_child_tracks(folder_track)
+    reaper.PreventUIRefresh(1)
+    reaper.Undo_BeginBlock()
+    
+    for _, child in ipairs(child_tracks) do
+        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
+            local item = reaper.GetTrackMediaItem(child, k)
+            
+            if is_original_item(item) then
+                local take = reaper.GetActiveTake(item)
+                
+                if take then
+                    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+                    local length = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+                    local snap = reaper.GetMediaItemInfo_Value(item, "D_SNAPOFFSET")
+                    local mute = reaper.GetMediaItemInfo_Value(item, "B_MUTE")
+                    local lock = reaper.GetMediaItemInfo_Value(item, "C_LOCK")
+                    local fadein = reaper.GetMediaItemInfo_Value(item, "D_FADEINLEN")
+                    local fadeout = reaper.GetMediaItemInfo_Value(item, "D_FADEOUTLEN")
+                    local fadeinshape = reaper.GetMediaItemInfo_Value(item, "C_FADEINSHAPE")
+                    local fadeoutshape = reaper.GetMediaItemInfo_Value(item, "C_FADEOUTSHAPE")
+                    
+                    local new_item = reaper.AddMediaItemToTrack(child)
+                    
+                    reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", pos + total_offset)
+                    reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", length)
+                    reaper.SetMediaItemInfo_Value(new_item, "D_SNAPOFFSET", snap)
+                    reaper.SetMediaItemInfo_Value(new_item, "B_MUTE", mute)
+                    reaper.SetMediaItemInfo_Value(new_item, "C_LOCK", lock)
+                    reaper.SetMediaItemInfo_Value(new_item, "D_FADEINLEN", fadein)
+                    reaper.SetMediaItemInfo_Value(new_item, "D_FADEOUTLEN", fadeout)
+                    reaper.SetMediaItemInfo_Value(new_item, "C_FADEINSHAPE", fadeinshape)
+                    reaper.SetMediaItemInfo_Value(new_item, "C_FADEOUTSHAPE", fadeoutshape)
+                    
+                    local new_take = reaper.AddTakeToMediaItem(new_item)
+                    local source = reaper.GetMediaItemTake_Source(take)
+                    reaper.SetMediaItemTake_Source(new_take, source)
+                    
+                    local vol = reaper.GetMediaItemTakeInfo_Value(take, "D_VOL")
+                    local pan = reaper.GetMediaItemTakeInfo_Value(take, "D_PAN")
+                    local pitch = reaper.GetMediaItemTakeInfo_Value(take, "D_PITCH")
+                    local playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_VOL", vol)
+                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PAN", pan)
+                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PITCH", pitch)
+                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", playrate)
+                    
+                    apply_random_parameters(new_item, new_take, item, take)
+                    
+                    set_item_notes(new_item, VARIATION_TAG)
+                end
+            end
+        end
+    end
+    
+    reaper.UpdateArrange()
+    reaper.Undo_EndBlock("Duplicate original items", -1)
+    reaper.PreventUIRefresh(-1)
+end
+
+local function find_max_variation_number(base_name)
     local max_number = 0
     local marker_count = reaper.CountProjectMarkers(0)
     
@@ -471,222 +893,9 @@ function RegionManager:find_max_variation_number(base_name)
     return max_number
 end
 
-function RegionManager:create(name, start_pos, end_pos)
-    reaper.AddProjectMarker2(0, true, start_pos, end_pos, name, -1, 0)
-end
-
--- ============================================================================
--- PROCESADOR PRINCIPAL (Dependency Inversion + Open/Closed)
--- ============================================================================
-
-local RegionProcessor = setmetatable({}, {__index = IRegionProcessor})
-
-function RegionProcessor:new(track_manager, item_manager, region_manager, randomization_manager)
-    local self = {
-        track_manager = track_manager,
-        item_manager = item_manager,
-        region_manager = region_manager,
-        randomization_manager = randomization_manager,
-        valid_tracks = {},
-        region_root_data = {},
-        region_parent_data = {}
-    }
-    return setmetatable(self, {__index = RegionProcessor})
-end
-
-function RegionProcessor:process_selected_tracks(settings)
-    self.valid_tracks = {}
-    self.region_root_data = {}
-    self.region_parent_data = {}
-    
-    local root_folder, root_name = self:_get_root_folder_info()
-    
-    for i = 0, reaper.CountSelectedTracks(0) - 1 do
-        local subfolder = reaper.GetSelectedTrack(0, i)
-        if self.track_manager:is_valid_subfolder(subfolder) then
-            self:_process_single_subfolder(subfolder, root_name, settings)
-        end
-    end
-    
-    return #self.valid_tracks
-end
-
-function RegionProcessor:get_valid_tracks()
-    return self.valid_tracks, self.region_root_data, self.region_parent_data
-end
-
-function RegionProcessor:_get_root_folder_info()
-    local root_folder = nil
-    local root_name = "Project"
-    
-    if reaper.CountSelectedTracks(0) > 0 then
-        local first_track = reaper.GetSelectedTrack(0, 0)
-        root_folder = self.track_manager:get_parent_track(first_track)
-        
-        if root_folder then
-            root_name = self.track_manager:get_name(root_folder)
-        else
-            local _, project_name = reaper.EnumProjects(-1, "")
-            root_name = project_name:match("([^\\/]+)$"):gsub("%..+$", "") or "Project"
-        end
-    end
-    
-    return root_folder, root_name
-end
-
-function RegionProcessor:_process_single_subfolder(subfolder, root_name, settings)
-    self:_mark_original_items(subfolder)
-    
-    local sub_name = Utils.clean_name(self.track_manager:get_name(subfolder))
-    local clean_root_name = Utils.clean_name(root_name)
-    
-    local min_start, max_end = self:_calculate_folder_time_range(subfolder)
-    if min_start == math.huge or max_end == 0 then return end
-    
-    local naming_strategy = NamingStrategyFactory.create(settings.prefix_type)
-    local base_name = naming_strategy:build_name(clean_root_name, sub_name, settings)
-    local total_duration = max_end - min_start
-    
-    self:_create_variations(subfolder, base_name, min_start, max_end, total_duration, clean_root_name, sub_name, settings)
-end
-
-function RegionProcessor:_mark_original_items(subfolder)
-    local child_tracks = self.track_manager:get_child_tracks(subfolder)
-    for _, child in ipairs(child_tracks) do
-        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
-            local item = reaper.GetTrackMediaItem(child, k)
-            self.item_manager:mark_as_original(item)
-        end
-    end
-end
-
-function RegionProcessor:_calculate_folder_time_range(folder_track)
-    local min_start = math.huge
+local function get_max_end_time(folder_track)
     local max_end = 0
-    local child_tracks = self.track_manager:get_child_tracks(folder_track)
-    
-    for _, child in ipairs(child_tracks) do
-        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
-            local item = reaper.GetTrackMediaItem(child, k)
-            if self.item_manager:is_original(item) then
-                local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-                local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-                local end_pos = pos + len
-                
-                min_start = math.min(min_start, pos)
-                max_end = math.max(max_end, end_pos)
-            end
-        end
-    end
-    
-    return min_start, max_end
-end
-
-function RegionProcessor:_create_variations(subfolder, base_name, min_start, max_end, total_duration, root_name, sub_name, settings)
-    local variations = (settings.prefix_type == "sx") and settings.variations or 0
-    local actual_variations = variations > 0 and variations or 1
-    
-    local max_end_all = self:_get_max_end_time(subfolder)
-    local base_offset = max_end_all - min_start + settings.separation_time
-    local max_variation = self.region_manager:find_max_variation_number(base_name)
-    
-    for variation = 1, actual_variations do
-        local rand_offset = 0
-        if variations > 0 and settings.randomize_position > 0 then
-            rand_offset = (math.random() * 2 - 1) * settings.randomize_position
-        end
-        
-        local time_offset = 0
-        if variations > 0 then
-            time_offset = base_offset + (variation - 1) * (total_duration + settings.separation_time)
-            self:_duplicate_original_items(subfolder, time_offset + rand_offset, settings)
-        end
-        
-        local variation_number = max_variation + variation
-        local region_name = string.format("%s_%02d", base_name, variation_number)
-        
-        local region_start, region_end
-        if variations == 0 then
-            region_start = min_start
-            region_end = max_end
-        else
-            region_start = min_start + time_offset + rand_offset
-            region_end = max_end + time_offset + rand_offset
-        end
-        
-        self.region_manager:create(region_name, region_start, region_end)
-        
-        self.region_root_data[region_name] = root_name
-        self.region_parent_data[region_name] = sub_name
-        
-        table.insert(self.valid_tracks, {
-            name = region_name,
-            start = region_start,
-            end_pos = region_end,
-            variation = variation_number
-        })
-    end
-end
-
-function RegionProcessor:_duplicate_original_items(folder_track, total_offset, settings)
-    local child_tracks = self.track_manager:get_child_tracks(folder_track)
-    local random_params = self:_build_random_params(settings)
-    
-    for _, child in ipairs(child_tracks) do
-        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
-            local item = reaper.GetTrackMediaItem(child, k)
-            
-            if self.item_manager:is_original(item) then
-                local take = reaper.GetActiveTake(item)
-                
-                if take then
-                    local new_item = self:_create_duplicate_item(item, child, total_offset)
-                    local new_take = self:_create_duplicate_take(take, new_item)
-                    
-                    self.randomization_manager:apply_to_item(new_item, new_take, item, take, random_params)
-                    self.item_manager:mark_as_variation(new_item)
-                end
-            end
-        end
-    end
-end
-
-function RegionProcessor:_create_duplicate_item(original_item, track, offset)
-    local new_item = reaper.AddMediaItemToTrack(track)
-    
-    local properties = {
-        "D_POSITION", "D_LENGTH", "D_SNAPOFFSET", "B_MUTE", "C_LOCK",
-        "D_FADEINLEN", "D_FADEOUTLEN", "C_FADEINSHAPE", "C_FADEOUTSHAPE"
-    }
-    
-    for _, prop in ipairs(properties) do
-        local value = reaper.GetMediaItemInfo_Value(original_item, prop)
-        if prop == "D_POSITION" then
-            value = value + offset
-        end
-        reaper.SetMediaItemInfo_Value(new_item, prop, value)
-    end
-    
-    return new_item
-end
-
-function RegionProcessor:_create_duplicate_take(original_take, new_item)
-    local new_take = reaper.AddTakeToMediaItem(new_item)
-    local source = reaper.GetMediaItemTake_Source(original_take)
-    reaper.SetMediaItemTake_Source(new_take, source)
-    
-    local take_properties = {"D_VOL", "D_PAN", "D_PITCH", "D_PLAYRATE"}
-    for _, prop in ipairs(take_properties) do
-        local value = reaper.GetMediaItemTakeInfo_Value(original_take, prop)
-        reaper.SetMediaItemTakeInfo_Value(new_take, prop, value)
-    end
-    
-    return new_take
-end
-
-function RegionProcessor:_get_max_end_time(folder_track)
-    local max_end = 0
-    local child_tracks = self.track_manager:get_child_tracks(folder_track)
+    local child_tracks = get_child_tracks(folder_track)
     for _, child in ipairs(child_tracks) do
         for k = 0, reaper.CountTrackMediaItems(child) - 1 do
             local item = reaper.GetTrackMediaItem(child, k)
@@ -699,384 +908,190 @@ function RegionProcessor:_get_max_end_time(folder_track)
     return max_end
 end
 
-function RegionProcessor:_build_random_params(settings)
-    return {
-        volume = {enable = settings.volume_enable, amount = settings.volume_amount},
-        pan = {enable = settings.pan_enable, amount = settings.pan_amount},
-        pitch = {enable = settings.pitch_enable, amount = settings.pitch_amount},
-        rate = {enable = settings.rate_enable, amount = settings.rate_amount},
-        position = {enable = true, amount = 0.0},
-        length = {enable = settings.length_enable, amount = settings.length_amount},
-        fadein = {enable = settings.fadein_enable, amount = settings.fadein_amount},
-        fadeout = {enable = settings.fadeout_enable, amount = settings.fadeout_amount},
-        fadeshape = {enable = settings.fadeshape_enable, amount = 1}
-    }
+-- Función principal para crear regiones (MEJORADA para detectar jerarquías individuales)
+local function create_regions_from_subfolders()
+    valid_tracks = {}
+    region_root_data = {}
+    region_parent_data = {}
+
+    for i = 0, reaper.CountSelectedTracks(0) - 1 do
+        local subfolder = reaper.GetSelectedTrack(0, i)
+        if not is_valid_subfolder(subfolder) then goto continue end
+
+        mark_original_items(subfolder)
+
+        local sub_name = clean_name(get_track_name(subfolder))
+        
+        -- OBTENER ROOT ESPECÍFICO PARA CADA SUBFOLDER
+        local root_track = get_parent_track(subfolder)
+        local root_name = "Project"
+        
+        if root_track then
+            root_name = clean_name(get_track_name(root_track))
+        else
+            local _, project_name = reaper.EnumProjects(-1, "")
+            root_name = project_name:match("([^\\/]+)$"):gsub("%..+$", "") or "Project"
+        end
+
+        local min_start, max_end = calculate_folder_time_range(subfolder)
+        if min_start == math.huge or max_end == 0 then goto continue end
+
+        local total_duration = max_end - min_start
+        local base_name
+        
+        if prefix_type == "sx" then
+            base_name = string.format("%s_%s_%s", prefix, root_name, sub_name)
+        elseif prefix_type == "mx" then
+            base_name = string.format("%s_%s_%s_%d_%s", 
+                prefix_type, root_name, sub_name, music_bpm, music_meter)
+        elseif prefix_type == "dx" then
+            local char_field = dx_character ~= "" and dx_character or "unknown"
+            local questType_field = dx_quest_type ~= "" and dx_quest_type or "SQ"
+            local questName_field = dx_quest_name ~= "" and dx_quest_name or sub_name
+            base_name = string.format("%s_%s_%s_%s_%02d", 
+                prefix_type, char_field, questType_field, questName_field, dx_line_number)
+        elseif prefix_type == "env" then
+            base_name = string.format("env_%s_%s", root_name, sub_name)
+        end
+
+        local actual_variations = variations > 0 and variations or 1
+        local max_end_all = get_max_end_time(subfolder)
+        local base_offset = max_end_all - min_start + separation_time
+        local max_variation = find_max_variation_number(base_name)
+        
+        for variation = 1, actual_variations do
+            local rand_offset = 0
+            if variations > 0 and randomize_position > 0 then
+                rand_offset = (math.random() * 2 - 1) * randomize_position
+            end
+            
+            local time_offset = 0
+            if variations > 0 then
+                time_offset = base_offset + (variation - 1) * (total_duration + separation_time)
+                duplicate_original_items(subfolder, time_offset + rand_offset)
+            end
+            
+            local variation_number = max_variation + variation
+            local region_name = string.format("%s_%02d", base_name, variation_number)
+            
+            local region_start, region_end
+            if variations == 0 then
+                region_start = min_start
+                region_end = max_end
+            else
+                region_start = min_start + time_offset + rand_offset
+                region_end = max_end + time_offset + rand_offset
+            end
+            
+            reaper.AddProjectMarker2(0, true, region_start, region_end, region_name, -1, 0)
+            
+            -- ALMACENAR DATOS JERÁRQUICOS ESPECÍFICOS DE CADA SUBFOLDER
+            region_root_data[region_name] = root_name
+            region_parent_data[region_name] = sub_name
+            
+            table.insert(valid_tracks, { 
+                name = region_name, 
+                start = region_start,
+                end_pos = region_end,
+                variation = variation_number
+            })
+        end
+
+        ::continue::
+    end
+
+    return #valid_tracks
 end
 
--- ============================================================================
--- GESTIÓN DE RENDER (Single Responsibility)
--- ============================================================================
-
-local RenderManager = {}
-
-function RenderManager:new()
-    return setmetatable({}, {__index = self})
-end
-
-function RenderManager:prepare_render(regions, settings, region_root_data, region_parent_data)
+-- Función para renderizado normal (mantener original)
+local function prepare_render_with_existing_regions(selected_only)
+    local regions = {}
+    
+    if selected_only then
+        local _, region_index = reaper.GetLastMarkerAndCurRegion(0, reaper.GetCursorPosition())
+        if region_index >= 0 then
+            local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(region_index)
+            if isrgn then
+                table.insert(regions, {name = name, start = pos, end_pos = rgnend})
+            else
+                reaper.ShowMessageBox("No hay región seleccionada.", "Error", 0)
+                return
+            end
+        else
+            reaper.ShowMessageBox("No hay región seleccionada.", "Error", 0)
+            return
+        end
+    else
+        local marker_count = reaper.CountProjectMarkers(0)
+        for i = 0, marker_count - 1 do
+            local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(i)
+            if isrgn then
+                table.insert(regions, {name = name, start = pos, end_pos = rgnend})
+            end
+        end
+    end
+    
     if #regions == 0 then
         reaper.ShowMessageBox("No hay regiones creadas.", "Error", 0)
         return
     end
     
-    self:_configure_basic_settings(settings)
-    local render_path = self:_build_render_path(regions[1], settings, region_root_data)
+    local render_path = custom_output_path ~= "" and custom_output_path or reaper.GetProjectPath("") .. "/Renders/"
     
-    reaper.RecursiveCreateDirectory(render_path, 0)
-    reaper.GetSetProjectInfo_String(0, "RENDER_FILE", render_path, true)
+    local type_folder = "SFX"
+    if prefix_type == "mx" then type_folder = "Music"
+    elseif prefix_type == "dx" then type_folder = "Dialogue"
+    elseif prefix_type == "env" then type_folder = "Environment" end
     
-    local expanded_pattern = self:_expand_wildcards(
-        settings.wildcard_template, 
-        regions[1], 
-        region_root_data, 
-        region_parent_data
-    )
+    render_path = render_path .. type_folder .. "/"
     
-    reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", expanded_pattern, true)
-    reaper.Main_OnCommand(40015, 0)
-end
-
-function RenderManager:browse_output_folder(current_path)
-    if reaper.JS_Dialog_BrowseForFolder then
-        local ret, folder_path = reaper.JS_Dialog_BrowseForFolder("Select Output Folder", current_path)
-        if ret == 1 then
-            return folder_path:gsub("[\\/]$", "") .. "/"
-        end
-    else
-        local ret, folder_path = reaper.GetUserFileNameForWrite("", "Select Output Folder", "")
-        if ret then
-            folder_path = folder_path:match("(.*[\\/])")
-            if folder_path then
-                return folder_path
-            end
-        end
+    local root_folder_name = "General"
+    local first_region = regions[1].name
+    
+    if region_root_data[first_region] then
+        root_folder_name = region_root_data[first_region]
     end
-    return current_path
-end
-
-function RenderManager:_configure_basic_settings(settings)
-    local render_path = settings.custom_output_path ~= "" and settings.custom_output_path or reaper.GetProjectPath("") .. "/Renders/"
-    reaper.GetSetProjectInfo_String(0, "RENDER_FILE", render_path, true)
-    reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "wav", true)
-    reaper.GetSetProjectInfo_String(0, "RENDER_SETTINGS", "24bit", true)
-end
-
-function RenderManager:_build_render_path(first_region, settings, region_root_data)
-    local render_path = settings.custom_output_path ~= "" and settings.custom_output_path or reaper.GetProjectPath("") .. "/Renders/"
     
-    local file_type = Utils.get_file_type_by_id(settings.prefix_type)
-    render_path = render_path .. file_type.folder .. "/"
-    
-    local root_folder_name = region_root_data[first_region.name] or "General"
     if root_folder_name == "Root" then
         root_folder_name = "General"
     end
     
     render_path = render_path .. root_folder_name .. "/"
-    return render_path
+    
+    reaper.RecursiveCreateDirectory(render_path, 0)
+    reaper.GetSetProjectInfo_String(0, "RENDER_FILE", render_path, true)
+    
+    local expanded_pattern = wildcard_template
+        :gsub("%$root", root_folder_name)
+        :gsub("%$parent", region_parent_data[first_region] or "Parent")
+        :gsub("%$region", first_region)
+    
+    reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", expanded_pattern, true)
+    reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "wav", true)
+    reaper.GetSetProjectInfo_String(0, "RENDER_SETTINGS", "24bit", true)
+    
+    reaper.Main_OnCommand(40015, 0)
 end
 
-function RenderManager:_expand_wildcards(template, first_region, region_root_data, region_parent_data)
-    local root_name = region_root_data[first_region.name] or "Root"
-    local parent_name = region_parent_data[first_region.name] or "Parent"
-    
-    local expanded = template
-    expanded = expanded:gsub("%$root", root_name)
-    expanded = expanded:gsub("%$parent", parent_name)
-    expanded = expanded:gsub("%$region", first_region.name)
-    
-    return expanded
-end
-
--- ============================================================================
--- INTERFAZ DE USUARIO (Separated Concerns)
--- ============================================================================
-
-local GUI = {}
-
-function GUI:new(settings_manager, region_processor, render_manager)
-    local self = {
-        ctx = reaper.ImGui_CreateContext(Config.CONSTANTS.SCRIPT_NAME .. ' v' .. Config.CONSTANTS.VERSION),
-        font = reaper.ImGui_CreateFont('sans-serif', 16),
-        settings_manager = settings_manager,
-        region_processor = region_processor,
-        render_manager = render_manager,
-        settings = settings_manager:load(),
-        is_open = true
-    }
-    
-    reaper.ImGui_Attach(self.ctx, self.font)
-    return setmetatable(self, {__index = GUI})
-end
-
-function GUI:show()
-    if self.is_open then
-        self:_render_window()
-        reaper.defer(function() self:show() end)
-    else
-        self:_cleanup()
-    end
-end
-
-function GUI:_render_window()
-    local visible, open = reaper.ImGui_Begin(
-        self.ctx, 
-        Config.CONSTANTS.SCRIPT_NAME .. ' v' .. Config.CONSTANTS.VERSION, 
-        true, 
-        reaper.ImGui_WindowFlags_AlwaysAutoResize()
-    )
-    
-    if visible then
-        reaper.ImGui_PushFont(self.ctx, self.font)
-        
-        self:_render_track_info()
-        self:_render_file_type_settings()
-        self:_render_variation_settings()
-        self:_render_wildcard_settings()
-        self:_render_output_settings()
-        self:_render_action_buttons()
-        self:_render_credits()
-        
-        reaper.ImGui_PopFont(self.ctx)
-        reaper.ImGui_End(self.ctx)
-    end
-    
-    self.is_open = open
-end
-
-function GUI:_render_track_info()
-    local sel_count = reaper.CountSelectedTracks(0)
-    reaper.ImGui_Text(self.ctx, "Selected tracks: " .. sel_count)
-    
-    if sel_count > 0 then
-        local first_track = reaper.GetSelectedTrack(0, 0)
-        local track_manager = TrackManager:new()
-        local depth = track_manager:get_folder_depth(first_track)
-        reaper.ImGui_Text(self.ctx, "First track depth: " .. depth)
-        
-        local root_track = track_manager:get_parent_track(first_track)
-        if root_track then
-            local root_name = track_manager:get_name(root_track)
-            reaper.ImGui_Text(self.ctx, "Detected root folder: " .. Utils.clean_name(root_name))
-        end
-    end
-    
-    reaper.ImGui_Separator(self.ctx)
-end
-
-function GUI:_render_file_type_settings()
-    reaper.ImGui_Text(self.ctx, "File type:")
-    reaper.ImGui_SameLine(self.ctx)
-    
-    local types = "SFX\0Music\0Dialogue\0Environment\0"
-    local current_type = Utils.get_file_type_by_id(self.settings.prefix_type).index
-    local changed, new_idx = reaper.ImGui_Combo(self.ctx, "##filetype", current_type, types)
-    
-    if changed then
-        self.settings.prefix_type = Utils.get_file_type_by_index(new_idx).id
-    end
-    
-    -- Renderizar configuraciones específicas según el tipo
-    local file_type = Utils.get_file_type_by_id(self.settings.prefix_type)
-    if file_type.id == "sx" then
-        self:_render_sfx_settings()
-    elseif file_type.id == "mx" then
-        self:_render_music_settings()
-    elseif file_type.id == "dx" then
-        self:_render_dialogue_settings()
-    end
-    
-    reaper.ImGui_Separator(self.ctx)
-end
-
-function GUI:_render_sfx_settings()
-    reaper.ImGui_Text(self.ctx, "Prefix for region names:")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 100)
-    _, self.settings.prefix = reaper.ImGui_InputText(self.ctx, "##prefix", self.settings.prefix)
-end
-
-function GUI:_render_music_settings()
-    reaper.ImGui_Text(self.ctx, "BPM:")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 120)
-    _, self.settings.music_bpm = reaper.ImGui_InputInt(self.ctx, "##music_bpm", self.settings.music_bpm)
-    self.settings.music_bpm = math.max(1, self.settings.music_bpm)
-    
-    reaper.ImGui_Text(self.ctx, "Meter (e.g: 4-4):")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 120)
-    _, self.settings.music_meter = reaper.ImGui_InputText(self.ctx, "##music_meter", self.settings.music_meter)
-end
-
-function GUI:_render_dialogue_settings()
-    reaper.ImGui_Text(self.ctx, "Character:")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 180)
-    _, self.settings.dx_character = reaper.ImGui_InputText(self.ctx, "##dx_character", self.settings.dx_character)
-    
-    reaper.ImGui_Text(self.ctx, "Quest Type (e.g: SQ, HC):")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 120)
-    _, self.settings.dx_quest_type = reaper.ImGui_InputText(self.ctx, "##dx_quest_type", self.settings.dx_quest_type)
-    
-    reaper.ImGui_Text(self.ctx, "Quest Name:")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 180)
-    _, self.settings.dx_quest_name = reaper.ImGui_InputText(self.ctx, "##dx_quest_name", self.settings.dx_quest_name)
-    
-    reaper.ImGui_Text(self.ctx, "Line Number:")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 80)
-    _, self.settings.dx_line_number = reaper.ImGui_InputInt(self.ctx, "##dx_line_number", self.settings.dx_line_number)
-    self.settings.dx_line_number = math.max(1, self.settings.dx_line_number)
-end
-
-function GUI:_render_variation_settings()
-    if self.settings.prefix_type == "sx" then
-        reaper.ImGui_Text(self.ctx, "Variations per subfolder (0 = regions only):")
-        reaper.ImGui_SetNextItemWidth(self.ctx, 100)
-        _, self.settings.variations = reaper.ImGui_InputInt(self.ctx, "Variations", self.settings.variations)
-        self.settings.variations = math.max(0, math.min(self.settings.variations, 100))
-        
-        if self.settings.variations > 0 then
-            self:_render_variation_parameters()
-        end
-        
-        reaper.ImGui_Separator(self.ctx)
-    end
-end
-
-function GUI:_render_variation_parameters()
-    reaper.ImGui_Text(self.ctx, "Separation between variations (s):")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 100)
-    _, self.settings.separation_time = reaper.ImGui_InputDouble(self.ctx, "##sep", self.settings.separation_time)
-    self.settings.separation_time = math.max(0.1, self.settings.separation_time)
-    
-    reaper.ImGui_Text(self.ctx, "Position randomization (s):")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 150)
-    _, self.settings.randomize_position = reaper.ImGui_SliderDouble(
-        self.ctx, "##rand_pos", self.settings.randomize_position, 
-        Config.SLIDER_RANGES.position.min, Config.SLIDER_RANGES.position.max, 
-        "Position: %.2f s"
-    )
-    
-    if reaper.ImGui_CollapsingHeader(self.ctx, "Variation Parameters") then
-        self:_render_randomization_parameters()
-    end
-end
-
-function GUI:_render_randomization_parameters()
-    local parameters = {
-        {name = "Volume", key = "volume", unit = "dB"},
-        {name = "Pan", key = "pan", unit = ""},
-        {name = "Pitch", key = "pitch", unit = "semitones"},
-        {name = "Rate", key = "rate", unit = ""},
-        {name = "Length", key = "length", unit = ""},
-        {name = "Fade In", key = "fadein", unit = ""},
-        {name = "Fade Out", key = "fadeout", unit = ""},
-        {name = "Fade Shape", key = "fadeshape", unit = "(randomly changes)"}
-    }
-    
-    for _, param in ipairs(parameters) do
-        local enable_key = param.key .. "_enable"
-        local amount_key = param.key .. "_amount"
-        
-        _, self.settings[enable_key] = reaper.ImGui_Checkbox(self.ctx, param.name, self.settings[enable_key])
-        
-        if self.settings[enable_key] and param.key ~= "fadeshape" then
-            reaper.ImGui_SameLine(self.ctx)
-            reaper.ImGui_SetNextItemWidth(self.ctx, 200)
-            
-            local range = Config.SLIDER_RANGES[param.key]
-            if range then
-                local format = param.key == "pitch" and "%.1f " .. param.unit or "%.2f " .. param.unit
-                _, self.settings[amount_key] = reaper.ImGui_SliderDouble(
-                    self.ctx, "##rand_" .. param.key, 
-                    self.settings[amount_key], 
-                    range.min, range.max, 
-                    format
-                )
-            end
-        elseif param.key == "fadeshape" and self.settings[enable_key] then
-            reaper.ImGui_SameLine(self.ctx)
-            reaper.ImGui_Text(self.ctx, param.unit)
-        end
-    end
-end
-
-function GUI:_render_wildcard_settings()
-    reaper.ImGui_Text(self.ctx, "Filename Pattern:")
-    reaper.ImGui_SetNextItemWidth(self.ctx, 300)
-    _, self.settings.wildcard_template = reaper.ImGui_InputText(self.ctx, "##wildcard_template", self.settings.wildcard_template)
-    
-    reaper.ImGui_Text(self.ctx, "Available wildcards:")
-    reaper.ImGui_BulletText(self.ctx, "$root: Parent folder name")
-    reaper.ImGui_BulletText(self.ctx, "$parent: Subfolder name (selected track)")
-    reaper.ImGui_BulletText(self.ctx, "$region: Region name")
-    reaper.ImGui_BulletText(self.ctx, "Also any other REAPER wildcard (e.g. $track)")
-    
-    reaper.ImGui_Separator(self.ctx)
-end
-
-function GUI:_render_output_settings()
-    reaper.ImGui_Text(self.ctx, "Output folder:")
-    
-    local display_path = self.settings.custom_output_path
-    if display_path == "" then
-        display_path = "Project/Renders/ (default)"
-    end
-    
-    reaper.ImGui_Text(self.ctx, "Current: " .. display_path)
-    
-    if reaper.ImGui_Button(self.ctx, "Browse Output Folder", 250, 30) then
-        self.settings.custom_output_path = self.render_manager:browse_output_folder(self.settings.custom_output_path)
-    end
-    
-    reaper.ImGui_SameLine(self.ctx)
-    if reaper.ImGui_Button(self.ctx, "Reset to Default", 150, 30) then
-        self.settings.custom_output_path = ""
-    end
-    
-    reaper.ImGui_Separator(self.ctx)
-end
-
-function GUI:_render_action_buttons()
-    if reaper.ImGui_Button(self.ctx, "Create regions", 250, 40) then
-        reaper.defer(function() self:_process_subfolders() end)
-    end
-    
-    reaper.ImGui_SameLine(self.ctx)
-    if reaper.ImGui_Button(self.ctx, "Prepare Render", 250, 40) then
-        self:_prepare_render()
-    end
-end
-
-function GUI:_render_credits()
-    reaper.ImGui_Separator(self.ctx)
-    reaper.ImGui_Spacing(self.ctx)
-    reaper.ImGui_Text(self.ctx, "Developed by " .. Config.CONSTANTS.AUTHOR)
-    reaper.ImGui_Spacing(self.ctx)
-end
-
-function GUI:_process_subfolders()
+local function process_subfolders()
     reaper.PreventUIRefresh(1)
     reaper.Undo_BeginBlock()
     
-    local orig_variations = self.settings.variations
+    local orig_variations = variations
     
-    if self.settings.prefix_type ~= "sx" then
-        self.settings.variations = 0
+    if prefix_type ~= "sx" then
+        variations = 0
     end
     
-    if self.settings.variations > 0 then
+    if variations > 0 and (randomize_position > 0 or 
+       random_params.volume.enable or random_params.pan.enable or 
+       random_params.pitch.enable or random_params.rate.enable or 
+       random_params.length.enable or random_params.fadein.enable or 
+       random_params.fadeout.enable or random_params.fadeshape.enable) then
         math.randomseed(os.time())
     end
     
-    local total = self.region_processor:process_selected_tracks(self.settings)
+    local total = create_regions_from_subfolders()
     
     if total == 0 then
         local msg = "No valid subfolders found.\n\n"
@@ -1093,71 +1108,336 @@ function GUI:_process_subfolders()
         reaper.ShowMessageBox(msg, "Selection Error", 0)
     end
     
-    self.settings.variations = orig_variations
+    variations = orig_variations
     
     reaper.PreventUIRefresh(-1)
     reaper.Undo_EndBlock("Create regions from subfolders", -1)
 end
 
-function GUI:_prepare_render()
-    local valid_tracks, region_root_data, region_parent_data = self.region_processor:get_valid_tracks()
-    
-    if #valid_tracks == 0 then
-        local region_manager = RegionManager:new()
-        valid_tracks = region_manager:get_all()
-        
-        -- Si no hay tracks válidos del procesador, intentar obtener la región seleccionada
-        if #valid_tracks == 0 then
-            local selected_region = region_manager:get_selected()
-            if selected_region then
-                valid_tracks = {selected_region}
+local function browse_output_folder()
+    if reaper.JS_Dialog_BrowseForFolder then
+        local ret, folder_path = reaper.JS_Dialog_BrowseForFolder("Select Output Folder", custom_output_path)
+        if ret == 1 then
+            custom_output_path = folder_path:gsub("[\\/]$", "") .. "/"
+        end
+    else
+        local ret, folder_path = reaper.GetUserFileNameForWrite("", "Select Output Folder", "")
+        if ret then
+            folder_path = folder_path:match("(.*[\\/])")
+            if folder_path then
+                custom_output_path = folder_path
             end
         end
     end
-    
-    self.render_manager:prepare_render(valid_tracks, self.settings, region_root_data, region_parent_data)
 end
 
-function GUI:_cleanup()
-    self.settings_manager:save(self.settings)
+-- ==================================================
+-- Interfaz gráfica (MEJORADA con nuevos botones)
+-- ==================================================
+
+function loop()
+    local visible, open = reaper.ImGui_Begin(ctx, 'SFX Renderer v2.1', true, 
+        reaper.ImGui_WindowFlags_AlwaysAutoResize())
     
-    if reaper.ImGui_DestroyContext then
-        reaper.ImGui_DestroyContext(self.ctx)
+    if visible then
+        reaper.ImGui_PushFont(ctx, font)
+        
+        local sel_count = reaper.CountSelectedTracks(0)
+        reaper.ImGui_Text(ctx, "Selected tracks: " .. sel_count)
+        
+        if sel_count > 0 then
+            local first_track = reaper.GetSelectedTrack(0, 0)
+            local depth = get_folder_depth(first_track)
+            reaper.ImGui_Text(ctx, "First track depth: " .. depth)
+            
+            local root_track = get_parent_track(first_track)
+            if root_track then
+                local root_name = get_track_name(root_track)
+                reaper.ImGui_Text(ctx, "Detected root folder: " .. clean_name(root_name))
+            end
+        end
+
+        reaper.ImGui_Separator(ctx)
+        
+        -- Selector de tipo de archivo
+        reaper.ImGui_Text(ctx, "File type:")
+        reaper.ImGui_SameLine(ctx)
+        local types = "SFX\0Music\0Dialogue\0Environment\0"
+        local current_type = (prefix_type == "sx") and 0 or (prefix_type == "mx") and 1 or (prefix_type == "dx") and 2 or 3
+        local changed, new_idx = reaper.ImGui_Combo(ctx, "##filetype", current_type, types)
+        if changed then
+            prefix_type = (new_idx == 0) and "sx" or (new_idx == 1) and "mx" or (new_idx == 2) and "dx" or "env"
+        end
+        
+        -- Configuración específica para cada tipo
+        if prefix_type == "sx" then
+            reaper.ImGui_Text(ctx, "Prefix for region names:")
+            reaper.ImGui_SetNextItemWidth(ctx, 100)
+            _, prefix = reaper.ImGui_InputText(ctx, "##prefix", prefix)
+        elseif prefix_type == "mx" then
+            reaper.ImGui_Text(ctx, "BPM:")
+            reaper.ImGui_SetNextItemWidth(ctx, 120)
+            _, music_bpm = reaper.ImGui_InputInt(ctx, "##music_bpm", music_bpm)
+            music_bpm = math.max(1, music_bpm)
+            
+            reaper.ImGui_Text(ctx, "Meter (e.g: 4-4):")
+            reaper.ImGui_SetNextItemWidth(ctx, 120)
+            _, music_meter = reaper.ImGui_InputText(ctx, "##music_meter", music_meter)
+        elseif prefix_type == "dx" then
+            reaper.ImGui_Text(ctx, "Character:")
+            reaper.ImGui_SetNextItemWidth(ctx, 180)
+            _, dx_character = reaper.ImGui_InputText(ctx, "##dx_character", dx_character)
+            
+            reaper.ImGui_Text(ctx, "Quest Type (e.g: SQ, HC):")
+            reaper.ImGui_SetNextItemWidth(ctx, 120)
+            _, dx_quest_type = reaper.ImGui_InputText(ctx, "##dx_quest_type", dx_quest_type)
+            
+            reaper.ImGui_Text(ctx, "Quest Name:")
+            reaper.ImGui_SetNextItemWidth(ctx, 180)
+            _, dx_quest_name = reaper.ImGui_InputText(ctx, "##dx_quest_name", dx_quest_name)
+            
+            reaper.ImGui_Text(ctx, "Line Number:")
+            reaper.ImGui_SetNextItemWidth(ctx, 80)
+            _, dx_line_number = reaper.ImGui_InputInt(ctx, "##dx_line_number", dx_line_number)
+            dx_line_number = math.max(1, dx_line_number)
+        end
+        
+        reaper.ImGui_Separator(ctx)
+        
+        -- Mostrar opciones solo para SFX
+        if prefix_type == "sx" then
+            reaper.ImGui_Text(ctx, "Variations per subfolder (0 = regions only):")
+            reaper.ImGui_SetNextItemWidth(ctx, 100)
+            _, variations = reaper.ImGui_InputInt(ctx, "Variations", variations)
+            variations = math.max(0, math.min(variations, 100))
+            
+            if variations > 0 then
+                reaper.ImGui_Text(ctx, "Separation between variations (s):")
+                reaper.ImGui_SetNextItemWidth(ctx, 100)
+                _, separation_time = reaper.ImGui_InputDouble(ctx, "##sep", separation_time)
+                separation_time = math.max(0.1, separation_time)
+                
+                reaper.ImGui_Text(ctx, "Position randomization (s):")
+                reaper.ImGui_SetNextItemWidth(ctx, 150)
+                _, randomize_position = reaper.ImGui_SliderDouble(ctx, "##rand_pos", randomize_position, 
+                    slider_ranges.position.min, slider_ranges.position.max, "Position: %.2f s")
+                
+                if reaper.ImGui_CollapsingHeader(ctx, "Variation Parameters") then
+                    reaper.ImGui_Text(ctx, "Enable and adjust parameters for variations:")
+                    
+                    _, random_params.volume.enable = reaper.ImGui_Checkbox(ctx, "Volume", random_params.volume.enable)
+                    if random_params.volume.enable then
+                        reaper.ImGui_SameLine(ctx)
+                        reaper.ImGui_SetNextItemWidth(ctx, 200)
+                        _, random_params.volume.amount = reaper.ImGui_SliderDouble(ctx, "##rand_vol", 
+                            random_params.volume.amount, slider_ranges.volume.min, slider_ranges.volume.max, 
+                            "%.2f dB")
+                    end
+                    
+                    _, random_params.pan.enable = reaper.ImGui_Checkbox(ctx, "Pan", random_params.pan.enable)
+                    if random_params.pan.enable then
+                        reaper.ImGui_SameLine(ctx)
+                        reaper.ImGui_SetNextItemWidth(ctx, 200)
+                        _, random_params.pan.amount = reaper.ImGui_SliderDouble(ctx, "##rand_pan", 
+                            random_params.pan.amount, slider_ranges.pan.min, slider_ranges.pan.max, 
+                            "%.2f")
+                    end
+                    
+                    _, random_params.pitch.enable = reaper.ImGui_Checkbox(ctx, "Pitch", random_params.pitch.enable)
+                    if random_params.pitch.enable then
+                        reaper.ImGui_SameLine(ctx)
+                        reaper.ImGui_SetNextItemWidth(ctx, 200)
+                        _, random_params.pitch.amount = reaper.ImGui_SliderDouble(ctx, "##rand_pitch", 
+                            random_params.pitch.amount, slider_ranges.pitch.min, slider_ranges.pitch.max, 
+                            "%.1f semitones")
+                    end
+                    
+                    _, random_params.rate.enable = reaper.ImGui_Checkbox(ctx, "Rate", random_params.rate.enable)
+                    if random_params.rate.enable then
+                        reaper.ImGui_SameLine(ctx)
+                        reaper.ImGui_SetNextItemWidth(ctx, 200)
+                        _, random_params.rate.amount = reaper.ImGui_SliderDouble(ctx, "##rand_rate", 
+                            random_params.rate.amount, slider_ranges.rate.min, slider_ranges.rate.max, 
+                            "%.2f")
+                    end
+                    
+                    _, random_params.length.enable = reaper.ImGui_Checkbox(ctx, "Length", random_params.length.enable)
+                    if random_params.length.enable then
+                        reaper.ImGui_SameLine(ctx)
+                        reaper.ImGui_SetNextItemWidth(ctx, 200)
+                        _, random_params.length.amount = reaper.ImGui_SliderDouble(ctx, "##rand_len", 
+                            random_params.length.amount, slider_ranges.length.min, slider_ranges.length.max, 
+                            "%.2f")
+                    end
+                    
+                    _, random_params.fadein.enable = reaper.ImGui_Checkbox(ctx, "Fade In", random_params.fadein.enable)
+                    if random_params.fadein.enable then
+                        reaper.ImGui_SameLine(ctx)
+                        reaper.ImGui_SetNextItemWidth(ctx, 200)
+                        _, random_params.fadein.amount = reaper.ImGui_SliderDouble(ctx, "##rand_fadein", 
+                            random_params.fadein.amount, slider_ranges.fadein.min, slider_ranges.fadein.max, 
+                            "%.2f")
+                    end
+                    
+                    _, random_params.fadeout.enable = reaper.ImGui_Checkbox(ctx, "Fade Out", random_params.fadeout.enable)
+                    if random_params.fadeout.enable then
+                        reaper.ImGui_SameLine(ctx)
+                        reaper.ImGui_SetNextItemWidth(ctx, 200)
+                        _, random_params.fadeout.amount = reaper.ImGui_SliderDouble(ctx, "##rand_fadeout", 
+                            random_params.fadeout.amount, slider_ranges.fadeout.min, slider_ranges.fadeout.max, 
+                            "%.2f")
+                    end
+                    
+                    _, random_params.fadeshape.enable = reaper.ImGui_Checkbox(ctx, "Fade Shape", random_params.fadeshape.enable)
+                    if random_params.fadeshape.enable then
+                        reaper.ImGui_SameLine(ctx)
+                        reaper.ImGui_Text(ctx, "(randomly changes)")
+                    end
+                end
+            end
+        end
+
+        reaper.ImGui_Separator(ctx)
+        reaper.ImGui_Text(ctx, "Filename Pattern:")
+        
+        reaper.ImGui_SetNextItemWidth(ctx, 300)
+        _, wildcard_template = reaper.ImGui_InputText(ctx, "##wildcard_template", wildcard_template)
+        
+        reaper.ImGui_Text(ctx, "Available wildcards:")
+        reaper.ImGui_BulletText(ctx, "$root: Parent folder name")
+        reaper.ImGui_BulletText(ctx, "$parent: Subfolder name (selected track)")
+        reaper.ImGui_BulletText(ctx, "$region: Region name")
+        reaper.ImGui_BulletText(ctx, "Also any other REAPER wildcard (e.g. $track)")
+        
+        reaper.ImGui_Separator(ctx)
+        reaper.ImGui_Text(ctx, "Output folder:")
+        
+        local display_path = custom_output_path
+        if display_path == "" then
+            display_path = "Project/Renders/ (default)"
+        end
+        
+        reaper.ImGui_Text(ctx, "Current: " .. display_path)
+        
+        if reaper.ImGui_Button(ctx, "Browse Output Folder", 250, 30) then
+            browse_output_folder()
+        end
+        
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Reset to Default", 150, 30) then
+            custom_output_path = ""
+        end
+
+        -- Botones principales
+        if reaper.ImGui_Button(ctx, "Create regions", 250, 40) then
+            reaper.defer(process_subfolders)
+        end
+        
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Prepare Render", 250, 40) then
+            prepare_render_with_existing_regions(false)
+        end
+
+        -- NUEVOS BOTONES PARA RENDERIZADO POR JERARQUÍAS
+        reaper.ImGui_Separator(ctx)
+        reaper.ImGui_Text(ctx, "Hierarchy Rendering:")
+        
+        if reaper.ImGui_Button(ctx, "Analyze Hierarchies", 166, 30) then
+            show_hierarchy_analysis()
+        end
+        
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Prepare Queue", 166, 30) then
+            prepare_hierarchy_render_queue()
+        end
+        
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Next Hierarchy", 166, 30) then
+            setup_next_hierarchy_render()
+        end
+        
+        reaper.ImGui_Spacing(ctx)
+        if reaper.ImGui_Button(ctx, "Queue Status", 166, 25) then
+            show_render_queue_status()
+        end
+        
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Clear Queue", 166, 25) then
+            hierarchy_render_queue = {}
+            current_hierarchy_index = 1
+            reaper.ShowMessageBox("Cola de renderizado limpiada.", "Cola Limpiada", 0)
+        end
+        
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Check Status", 166, 25) then
+            check_hierarchy_data_status()
+        end
+        
+        -- NUEVOS BOTONES PARA MIGRACIÓN DE REGIONES EXISTENTES
+        reaper.ImGui_Separator(ctx)
+        reaper.ImGui_Text(ctx, "Migration Tools:")
+        
+        if reaper.ImGui_Button(ctx, "Migrate Existing Regions", 250, 30) then
+            migrate_existing_regions()
+        end
+        
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Manual Migration", 250, 30) then
+            manual_region_migration()
+        end
+
+        -- Créditos
+        reaper.ImGui_Separator(ctx)
+        reaper.ImGui_Spacing(ctx)
+        reaper.ImGui_Text(ctx, "Developed by Daniel \"Panchuel\" Montoya")
+        reaper.ImGui_Spacing(ctx)
+
+        reaper.ImGui_PopFont(ctx)
+        reaper.ImGui_End(ctx)
+    end
+
+    if not open then
+        -- Guardar configuración al cerrar la ventana
+        local settings_to_save = {
+            prefix = prefix,
+            prefix_type = prefix_type,
+            variations = variations,
+            separation_time = separation_time,
+            randomize_position = randomize_position,
+            wildcard_template = wildcard_template,
+            custom_output_path = custom_output_path,
+            music_bpm = music_bpm,
+            music_meter = music_meter,
+            dx_character = dx_character,
+            dx_quest_type = dx_quest_type,
+            dx_quest_name = dx_quest_name,
+            dx_line_number = dx_line_number,
+            volume_enable = random_params.volume.enable,
+            volume_amount = random_params.volume.amount,
+            pan_enable = random_params.pan.enable,
+            pan_amount = random_params.pan.amount,
+            pitch_enable = random_params.pitch.enable,
+            pitch_amount = random_params.pitch.amount,
+            rate_enable = random_params.rate.enable,
+            rate_amount = random_params.rate.amount,
+            length_enable = random_params.length.enable,
+            length_amount = random_params.length.amount,
+            fadein_enable = random_params.fadein.enable,
+            fadein_amount = random_params.fadein.amount,
+            fadeout_enable = random_params.fadeout.enable,
+            fadeout_amount = random_params.fadeout.amount,
+            fadeshape_enable = random_params.fadeshape.enable
+        }
+        
+        save_settings(settings_to_save)
+        
+        if reaper.ImGui_DestroyContext then
+            reaper.ImGui_DestroyContext(ctx)
+        end
+    else
+        reaper.defer(loop)
     end
 end
 
--- ============================================================================
--- FACTORY PRINCIPAL (Dependency Injection)
--- ============================================================================
-
-local AppFactory = {}
-
-function AppFactory.create()
-    -- Crear dependencias
-    local settings_manager = SettingsManager:new()
-    local track_manager = TrackManager:new()
-    local item_manager = ItemManager:new()
-    local region_manager = RegionManager:new()
-    local randomization_manager = RandomizationManager:new()
-    local render_manager = RenderManager:new()
-    
-    -- Crear procesador principal con dependencias inyectadas
-    local region_processor = RegionProcessor:new(
-        track_manager, 
-        item_manager, 
-        region_manager, 
-        randomization_manager
-    )
-    
-    -- Crear GUI con dependencias inyectadas
-    local gui = GUI:new(settings_manager, region_processor, render_manager)
-    
-    return gui
-end
-
--- ============================================================================
--- PUNTO DE ENTRADA
--- ============================================================================
-
-local app = AppFactory.create()
-app:show()
+-- Iniciar
+reaper.defer(loop)
