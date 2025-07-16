@@ -380,7 +380,7 @@ Este script fue desarrollado por **Daniel "Panchuel" Montoya** como una herramie
 **Versión:** 2.1  
 **Autor:** Daniel "Panchuel" Montoya  
 **Compatible con:** REAPER 6.0+  
-**Última actualización:** 2024
+**Última actualización:** 2025
 
 ---
 
