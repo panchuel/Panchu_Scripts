@@ -26,6 +26,9 @@ Un script avanzado para REAPER que automatiza la creación de regiones y el rend
 
 ## 🎮 Interfaz de Usuario
 
+<img width="547" height="626" alt="image" src="https://github.com/user-attachments/assets/4007a6ba-3128-4458-9fbd-3543473a6c56" />
+
+
 ### **📊 Información de Tracks**
 ```
 Selected tracks: 4
