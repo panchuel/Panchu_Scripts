@@ -370,9 +370,6 @@ Este script fue desarrollado por **Daniel "Panchuel" Montoya** como una herramie
 - [ ] Templates de proyectos
 - [ ] Integración con motores de juego
 
-## 📄 Licencia
-
-Este script es de uso libre para proyectos personales y comerciales. Se agradece la atribución al autor original.
 
 ---
 
