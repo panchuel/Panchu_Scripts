@@ -1,10 +1,10 @@
 --@description Renderizador SFX con jerarquía + GUI + Wildcards + Persistencia + Renderizado Manual por Jerarquías
---@version 2.1
+--@version 2.2
 --@author Panchu
 --@provides [main] .
 
 local reaper = reaper
-local ctx = reaper.ImGui_CreateContext('SFX Renderer v2.1')
+local ctx = reaper.ImGui_CreateContext('SFX Renderer v2.2')
 local font = reaper.ImGui_CreateFont('sans-serif', 16)
 reaper.ImGui_Attach(ctx, font)
 
@@ -127,8 +127,11 @@ local current_hierarchy_index = 1
 local ORIGINAL_TAG = "SFX_ORIGINAL"
 local VARIATION_TAG = "SFX_VARIATION"
 
+-- Almacenar información jerárquica usando ID único
+local region_hierarchy_data = {}  -- {region_id = {root = "AMB", parent = "Jurassic"}}
+
 -- ==================================================
--- Funciones auxiliares (mantener originales)
+-- Funciones auxiliares
 -- ==================================================
 
 local function clean_name(name)
@@ -230,7 +233,7 @@ local function is_valid_subfolder(track)
     return #child_tracks > 0
 end
 
--- Aplicar parámetros aleatorizados a un nuevo item (mantener función original)
+-- Aplicar parámetros aleatorizados a un nuevo item
 local function apply_random_parameters(new_item, new_take, original_item, original_take)
     if random_params.volume.enable and random_params.volume.amount > 0 then
         local vol_db = (math.random() * 2 - 1) * random_params.volume.amount
@@ -274,7 +277,7 @@ local function apply_random_parameters(new_item, new_take, original_item, origin
         reaper.SetMediaItemInfo_Value(new_item, "D_FADEOUTLEN", fadeout_len * fadeout_factor)
     end
     
-    if random_params.fadeshape.enable and random_params.fadeshape.amount > 0 then
+    if random_params.fadeshape.enable and random_params.fadeshake.enable then
         local shapes = {0, 1, 2, 3}
         local new_shape = shapes[math.random(1, #shapes)]
         reaper.SetMediaItemInfo_Value(new_item, "C_FADEINSHAPE", new_shape)
@@ -283,11 +286,423 @@ local function apply_random_parameters(new_item, new_take, original_item, origin
 end
 
 -- ==================================================
--- NUEVAS FUNCIONES PARA RENDERIZADO MANUAL POR JERARQUÍAS
+-- Funciones para manejar jerarquías con ID único
 -- ==================================================
 
+-- Obtener un ID único para una región
+local function get_region_id(index)
+    local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(index)
+    if not isrgn then return nil end
+    return string.format("%.10f_%.10f", pos, rgnend)  -- Usar posición como ID único
+end
+
+-- Actualizar datos jerárquicos
+local function update_region_hierarchy(region_index, root, parent)
+    local region_id = get_region_id(region_index)
+    if region_id then
+        region_hierarchy_data[region_id] = {root = root, parent = parent}
+        return true
+    end
+    return false
+end
+
+-- Obtener datos jerárquicos para una región
+local function get_region_hierarchy(region_index)
+    local region_id = get_region_id(region_index)
+    if region_id and region_hierarchy_data[region_id] then
+        return region_hierarchy_data[region_id]
+    end
+    
+    -- Intentar extraer de nombre si es posible
+    local _, isrgn, _, _, name, _ = reaper.EnumProjectMarkers(region_index)
+    if isrgn then
+        local root, parent = name:match("^%w+_([^_]+)_([^_]+)_%d+$")
+        if root and parent then
+            return {root = root, parent = parent}
+        end
+    end
+    
+    return {root = "General", parent = "Parent"}
+end
+
 -- ==================================================
--- NUEVAS FUNCIONES PARA TRABAJAR CON REGIONES EXISTENTES
+-- Funciones para detección y manejo de regiones
+-- ==================================================
+
+-- Función para obtener la región seleccionada (MOVIDA ARRIBA PARA SOLUCIONAR EL ERROR)
+local function get_selected_region()
+    local pos = reaper.GetCursorPosition()
+    local _, region_index = reaper.GetLastMarkerAndCurRegion(0, pos)
+    
+    if region_index >= 0 then
+        local _, isrgn, rgnpos, rgnend, name, _ = reaper.EnumProjectMarkers(region_index)
+        if isrgn then
+            return {
+                name = name,
+                start = rgnpos,
+                end_pos = rgnend,
+                index = region_index
+            }
+        end
+    end
+    
+    -- Buscar manualmente si no se detectó automáticamente
+    local marker_count = reaper.CountProjectMarkers(0)
+    for i = 0, marker_count - 1 do
+        local _, isrgn, rgnpos, rgnend, name, _ = reaper.EnumProjectMarkers(i)
+        if isrgn then
+            local is_selected = false
+            
+            -- Verificar si está en la selección de tiempo
+            local sel_start, sel_end = reaper.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+            if sel_start == rgnpos and sel_end == rgnend then
+                is_selected = true
+            end
+            
+            -- Verificar si el cursor está dentro de la región
+            if pos >= rgnpos and pos <= rgnend then
+                is_selected = true
+            end
+            
+            if is_selected then
+                return {
+                    name = name,
+                    start = rgnpos,
+                    end_pos = rgnend,
+                    index = i
+                }
+            end
+        end
+    end
+    
+    return nil
+end
+
+-- Función para actualizar jerarquía cuando se modifica una región
+local function update_hierarchy_for_renamed_region()
+    local region = get_selected_region()
+    if not region then
+        reaper.ShowMessageBox("Selecciona una región primero", "Actualizar Jerarquía", 0)
+        return
+    end
+    
+    local current_name = region.name
+    local current_hierarchy = get_region_hierarchy(region.index)
+    
+    local prompt = "Región: " .. current_name .. "\n\nIngresa nueva jerarquía:"
+    local default_values = current_hierarchy.root .. "," .. current_hierarchy.parent
+    
+    local retval, user_input = reaper.GetUserInputs("Actualizar Jerarquía", 2, 
+        "Root,Parent:", default_values)
+    
+    if retval then
+        local root, parent = user_input:match("([^,]+),([^,]+)")
+        if root and parent then
+            if update_region_hierarchy(region.index, root, parent) then
+                reaper.ShowMessageBox("Jerarquía actualizada:\nRoot: " .. root .. "\nParent: " .. parent, 
+                    "Actualización Exitosa", 0)
+            else
+                reaper.ShowMessageBox("Error al actualizar jerarquía", "Error", 0)
+            end
+        else
+            reaper.ShowMessageBox("Formato incorrecto. Usa: root,parent", "Error", 0)
+        end
+    end
+end
+
+-- ==================================================
+-- Funciones para renderizado
+-- ==================================================
+
+local function calculate_folder_time_range(folder_track)
+    local min_start = math.huge
+    local max_end = 0
+    local child_tracks = get_child_tracks(folder_track)
+    
+    for _, child in ipairs(child_tracks) do
+        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
+            local item = reaper.GetTrackMediaItem(child, k)
+            if is_original_item(item) then
+                local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+                local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+                local end_pos = pos + len
+                
+                min_start = math.min(min_start, pos)
+                max_end = math.max(max_end, end_pos)
+            end
+        end
+    end
+    
+    return min_start, max_end
+end
+
+local function duplicate_original_items(folder_track, total_offset)
+    local child_tracks = get_child_tracks(folder_track)
+    reaper.PreventUIRefresh(1)
+    reaper.Undo_BeginBlock()
+    
+    for _, child in ipairs(child_tracks) do
+        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
+            local item = reaper.GetTrackMediaItem(child, k)
+            
+            if is_original_item(item) then
+                local take = reaper.GetActiveTake(item)
+                
+                if take then
+                    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+                    local length = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+                    local snap = reaper.GetMediaItemInfo_Value(item, "D_SNAPOFFSET")
+                    local mute = reaper.GetMediaItemInfo_Value(item, "B_MUTE")
+                    local lock = reaper.GetMediaItemInfo_Value(item, "C_LOCK")
+                    local fadein = reaper.GetMediaItemInfo_Value(item, "D_FADEINLEN")
+                    local fadeout = reaper.GetMediaItemInfo_Value(item, "D_FADEOUTLEN")
+                    local fadeinshape = reaper.GetMediaItemInfo_Value(item, "C_FADEINSHAPE")
+                    local fadeoutshape = reaper.GetMediaItemInfo_Value(item, "C_FADEOUTSHAPE")
+                    
+                    local new_item = reaper.AddMediaItemToTrack(child)
+                    
+                    reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", pos + total_offset)
+                    reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", length)
+                    reaper.SetMediaItemInfo_Value(new_item, "D_SNAPOFFSET", snap)
+                    reaper.SetMediaItemInfo_Value(new_item, "B_MUTE", mute)
+                    reaper.SetMediaItemInfo_Value(new_item, "C_LOCK", lock)
+                    reaper.SetMediaItemInfo_Value(new_item, "D_FADEINLEN", fadein)
+                    reaper.SetMediaItemInfo_Value(new_item, "D_FADEOUTLEN", fadeout)
+                    reaper.SetMediaItemInfo_Value(new_item, "C_FADEINSHAPE", fadeinshape)
+                    reaper.SetMediaItemInfo_Value(new_item, "C_FADEOUTSHAPE", fadeoutshape)
+                    
+                    local new_take = reaper.AddTakeToMediaItem(new_item)
+                    local source = reaper.GetMediaItemTake_Source(take)
+                    reaper.SetMediaItemTake_Source(new_take, source)
+                    
+                    local vol = reaper.GetMediaItemTakeInfo_Value(take, "D_VOL")
+                    local pan = reaper.GetMediaItemTakeInfo_Value(take, "D_PAN")
+                    local pitch = reaper.GetMediaItemTakeInfo_Value(take, "D_PITCH")
+                    local playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_VOL", vol)
+                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PAN", pan)
+                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PITCH", pitch)
+                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", playrate)
+                    
+                    apply_random_parameters(new_item, new_take, item, take)
+                    
+                    set_item_notes(new_item, VARIATION_TAG)
+                end
+            end
+        end
+    end
+    
+    reaper.UpdateArrange()
+    reaper.Undo_EndBlock("Duplicate original items", -1)
+    reaper.PreventUIRefresh(-1)
+end
+
+local function find_max_variation_number(base_name)
+    local max_number = 0
+    local marker_count = reaper.CountProjectMarkers(0)
+    
+    for i = 0, marker_count - 1 do
+        local _, isrgn, _, _, name, _ = reaper.EnumProjectMarkers(i)
+        if isrgn and name then
+            local pattern = base_name .. "_(%d+)$"
+            local number_str = name:match(pattern)
+            if number_str then
+                local number = tonumber(number_str)
+                if number and number > max_number then
+                    max_number = number
+                end
+            end
+        end
+    end
+    
+    return max_number
+end
+
+local function get_max_end_time(folder_track)
+    local max_end = 0
+    local child_tracks = get_child_tracks(folder_track)
+    for _, child in ipairs(child_tracks) do
+        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
+            local item = reaper.GetTrackMediaItem(child, k)
+            local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+            local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+            local end_pos = pos + len
+            max_end = math.max(max_end, end_pos)
+        end
+    end
+    return max_end
+end
+
+-- Función principal para crear regiones
+local function create_regions_from_subfolders()
+    valid_tracks = {}
+    region_root_data = {}
+    region_parent_data = {}
+
+    for i = 0, reaper.CountSelectedTracks(0) - 1 do
+        local subfolder = reaper.GetSelectedTrack(0, i)
+        if not is_valid_subfolder(subfolder) then goto continue end
+
+        mark_original_items(subfolder)
+
+        local sub_name = clean_name(get_track_name(subfolder))
+        
+        -- OBTENER ROOT ESPECÍFICO PARA CADA SUBFOLDER
+        local root_track = get_parent_track(subfolder)
+        local root_name = "Project"
+        
+        if root_track then
+            root_name = clean_name(get_track_name(root_track))
+        else
+            local _, project_name = reaper.EnumProjects(-1, "")
+            root_name = project_name:match("([^\\/]+)$"):gsub("%..+$", "") or "Project"
+        end
+
+        local min_start, max_end = calculate_folder_time_range(subfolder)
+        if min_start == math.huge or max_end == 0 then goto continue end
+
+        local total_duration = max_end - min_start
+        local base_name
+        
+        if prefix_type == "sx" then
+            base_name = string.format("%s_%s_%s", prefix, root_name, sub_name)
+        elseif prefix_type == "mx" then
+            base_name = string.format("%s_%s_%s_%d_%s", 
+                prefix_type, root_name, sub_name, music_bpm, music_meter)
+        elseif prefix_type == "dx" then
+            local char_field = dx_character ~= "" and dx_character or "unknown"
+            local questType_field = dx_quest_type ~= "" and dx_quest_type or "SQ"
+            local questName_field = dx_quest_name ~= "" and dx_quest_name or sub_name
+            base_name = string.format("%s_%s_%s_%s_%02d", 
+                prefix_type, char_field, questType_field, questName_field, dx_line_number)
+        elseif prefix_type == "env" then
+            base_name = string.format("env_%s_%s", root_name, sub_name)
+        end
+
+        local actual_variations = variations > 0 and variations or 1
+        local max_end_all = get_max_end_time(subfolder)
+        local base_offset = max_end_all - min_start + separation_time
+        local max_variation = find_max_variation_number(base_name)
+        
+        for variation = 1, actual_variations do
+            local rand_offset = 0
+            if variations > 0 and randomize_position > 0 then
+                rand_offset = (math.random() * 2 - 1) * randomize_position
+            end
+            
+            local time_offset = 0
+            if variations > 0 then
+                time_offset = base_offset + (variation - 1) * (total_duration + separation_time)
+                duplicate_original_items(subfolder, time_offset + rand_offset)
+            end
+            
+            local variation_number = max_variation + variation
+            local region_name = string.format("%s_%02d", base_name, variation_number)
+            
+            local region_start, region_end
+            if variations == 0 then
+                region_start = min_start
+                region_end = max_end
+            else
+                region_start = min_start + time_offset + rand_offset
+                region_end = max_end + time_offset + rand_offset
+            end
+            
+            local region_index = reaper.AddProjectMarker2(0, true, region_start, region_end, region_name, -1, 0)
+            
+            -- ALMACENAR DATOS JERÁRQUICOS CON ID ÚNICO
+            update_region_hierarchy(region_index, root_name, sub_name)
+            
+            table.insert(valid_tracks, { 
+                name = region_name, 
+                start = region_start,
+                end_pos = region_end,
+                variation = variation_number
+            })
+        end
+
+        ::continue::
+    end
+
+    return #valid_tracks
+end
+
+-- Función para renderizado
+local function prepare_render_with_existing_regions(render_all)
+    local regions = {}
+    
+    if render_all then
+        -- Todas las regiones
+        local marker_count = reaper.CountProjectMarkers(0)
+        for i = 0, marker_count - 1 do
+            local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(i)
+            if isrgn then
+                table.insert(regions, {name = name, start = pos, end_pos = rgnend, index = i})
+            end
+        end
+    else
+        -- Solo la región seleccionada
+        local region = get_selected_region()
+        if region then
+            table.insert(regions, region)
+        else
+            reaper.ShowMessageBox("No hay región seleccionada.\n\nSelecciona una región:\n1. Coloca el cursor dentro de ella\n2. O selecciona su rango de tiempo", "Región no detectada", 0)
+            return
+        end
+    end
+    
+    if #regions == 0 then
+        reaper.ShowMessageBox("No hay regiones creadas.", "Error", 0)
+        return
+    end
+    
+    local render_path = custom_output_path ~= "" and custom_output_path or reaper.GetProjectPath("") .. "/Renders/"
+    
+    local type_folder = "SFX"
+    if prefix_type == "mx" then type_folder = "Music"
+    elseif prefix_type == "dx" then type_folder = "Dialogue"
+    elseif prefix_type == "env" then type_folder = "Environment" end
+    
+    render_path = render_path .. type_folder .. "/"
+    
+    -- Para la región, obtener root y parent específicos
+    local first_region = regions[1]
+    local hierarchy = get_region_hierarchy(first_region.index)
+    local root_folder_name = hierarchy.root
+    local parent_name = hierarchy.parent
+    
+    if root_folder_name == "Root" then
+        root_folder_name = "General"
+    end
+    
+    render_path = render_path .. root_folder_name .. "/"
+    
+    reaper.RecursiveCreateDirectory(render_path, 0)
+    reaper.GetSetProjectInfo_String(0, "RENDER_FILE", render_path, true)
+    
+    local expanded_pattern = wildcard_template
+        :gsub("%$root", root_folder_name)
+        :gsub("%$parent", parent_name)
+        :gsub("%$region", first_region.name)
+    
+    reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", expanded_pattern, true)
+    reaper.GetSetProjectInfo_String(0, "RENDER_BOUNDSFLAG", "1", true) -- Regiones
+    reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "wav", true)
+    reaper.GetSetProjectInfo_String(0, "RENDER_SETTINGS", "24bit", true)
+    
+    -- Configurar para renderizar solo la región seleccionada si es el caso
+    if not render_all then
+        reaper.GetSetProjectInfo_String(0, "RENDER_FILTER", "1", true) -- Solo regiones/marcadores seleccionados
+        reaper.SetProjectMarker(first_region.index, true, first_region.start, first_region.end_pos, first_region.name, -1)
+    else
+        reaper.GetSetProjectInfo_String(0, "RENDER_FILTER", "0", true) -- Todas las regiones
+    end
+    
+    reaper.Main_OnCommand(40015, 0)
+end
+
+-- ==================================================
+-- Funciones para migración y análisis
 -- ==================================================
 
 -- Extraer información jerárquica de nombres de regiones existentes
@@ -303,7 +718,8 @@ local function extract_hierarchy_from_region_names()
             table.insert(regions, {
                 name = name,
                 start = pos,
-                end_pos = rgnend
+                end_pos = rgnend,
+                index = i
             })
         end
     end
@@ -322,13 +738,8 @@ local function extract_hierarchy_from_region_names()
         root, parent = name:match("^%w+_([^_]+)_([^_]+)_%d+$")
         
         if root and parent then
-            region_root_data[name] = root
-            region_parent_data[name] = parent
+            update_region_hierarchy(region.index, root, parent)
             extracted_count = extracted_count + 1
-        else
-            -- Si no se puede extraer, marcar como desconocido
-            region_root_data[name] = "Unknown"
-            region_parent_data[name] = "Unknown"
         end
     end
     
@@ -392,7 +803,8 @@ local function manual_region_migration()
             table.insert(regions, {
                 name = name,
                 start = pos,
-                end_pos = rgnend
+                end_pos = rgnend,
+                index = i
             })
         end
     end
@@ -428,8 +840,7 @@ local function manual_region_migration()
                 root = root:match("^%s*(.-)%s*$")
                 parent = parent:match("^%s*(.-)%s*$")
                 
-                region_root_data[region.name] = root
-                region_parent_data[region.name] = parent
+                update_region_hierarchy(region.index, root, parent)
                 migrated_count = migrated_count + 1
             else
                 reaper.ShowMessageBox("Formato incorrecto. Saltando región: " .. region.name, "Error de Formato", 0)
@@ -452,7 +863,7 @@ local function check_hierarchy_data_status()
     for i = 0, marker_count - 1 do
         local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(i)
         if isrgn then
-            table.insert(regions, {name = name})
+            table.insert(regions, {name = name, index = i})
         end
     end
     
@@ -465,8 +876,8 @@ local function check_hierarchy_data_status()
     local without_data = 0
     
     for _, region in ipairs(regions) do
-        if region_root_data[region.name] and region_parent_data[region.name] and
-           region_root_data[region.name] ~= "" and region_parent_data[region.name] ~= "" then
+        local hierarchy = get_region_hierarchy(region.index)
+        if hierarchy.root ~= "General" and hierarchy.parent ~= "Parent" then
             with_data = with_data + 1
         else
             without_data = without_data + 1
@@ -507,7 +918,8 @@ local function analyze_hierarchies_safe()
             table.insert(regions, {
                 name = name,
                 start = pos,
-                end_pos = rgnend
+                end_pos = rgnend,
+                index = i
             })
         end
     end
@@ -520,8 +932,8 @@ local function analyze_hierarchies_safe()
     -- Verificar si hay información jerárquica
     local has_hierarchy_data = false
     for _, region in ipairs(regions) do
-        if region_root_data[region.name] and region_parent_data[region.name] and
-           region_root_data[region.name] ~= "" and region_parent_data[region.name] ~= "" then
+        local hierarchy = get_region_hierarchy(region.index)
+        if hierarchy.root ~= "General" and hierarchy.parent ~= "Parent" then
             has_hierarchy_data = true
             break
         end
@@ -554,8 +966,9 @@ local function analyze_hierarchies_safe()
     local hierarchies = {}
     
     for _, region in ipairs(regions) do
-        local root = region_root_data[region.name] or "Unknown"
-        local parent = region_parent_data[region.name] or "Unknown"
+        local hierarchy = get_region_hierarchy(region.index)
+        local root = hierarchy.root
+        local parent = hierarchy.parent
         local hierarchy_key = root .. "|" .. parent
         
         if not hierarchies[hierarchy_key] then
@@ -786,292 +1199,8 @@ local function show_render_queue_status()
 end
 
 -- ==================================================
--- Funciones principales (mantener originales)
+-- Funciones principales
 -- ==================================================
-
-local function calculate_folder_time_range(folder_track)
-    local min_start = math.huge
-    local max_end = 0
-    local child_tracks = get_child_tracks(folder_track)
-    
-    for _, child in ipairs(child_tracks) do
-        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
-            local item = reaper.GetTrackMediaItem(child, k)
-            if is_original_item(item) then
-                local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-                local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-                local end_pos = pos + len
-                
-                min_start = math.min(min_start, pos)
-                max_end = math.max(max_end, end_pos)
-            end
-        end
-    end
-    
-    return min_start, max_end
-end
-
-local function duplicate_original_items(folder_track, total_offset)
-    local child_tracks = get_child_tracks(folder_track)
-    reaper.PreventUIRefresh(1)
-    reaper.Undo_BeginBlock()
-    
-    for _, child in ipairs(child_tracks) do
-        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
-            local item = reaper.GetTrackMediaItem(child, k)
-            
-            if is_original_item(item) then
-                local take = reaper.GetActiveTake(item)
-                
-                if take then
-                    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-                    local length = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-                    local snap = reaper.GetMediaItemInfo_Value(item, "D_SNAPOFFSET")
-                    local mute = reaper.GetMediaItemInfo_Value(item, "B_MUTE")
-                    local lock = reaper.GetMediaItemInfo_Value(item, "C_LOCK")
-                    local fadein = reaper.GetMediaItemInfo_Value(item, "D_FADEINLEN")
-                    local fadeout = reaper.GetMediaItemInfo_Value(item, "D_FADEOUTLEN")
-                    local fadeinshape = reaper.GetMediaItemInfo_Value(item, "C_FADEINSHAPE")
-                    local fadeoutshape = reaper.GetMediaItemInfo_Value(item, "C_FADEOUTSHAPE")
-                    
-                    local new_item = reaper.AddMediaItemToTrack(child)
-                    
-                    reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", pos + total_offset)
-                    reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", length)
-                    reaper.SetMediaItemInfo_Value(new_item, "D_SNAPOFFSET", snap)
-                    reaper.SetMediaItemInfo_Value(new_item, "B_MUTE", mute)
-                    reaper.SetMediaItemInfo_Value(new_item, "C_LOCK", lock)
-                    reaper.SetMediaItemInfo_Value(new_item, "D_FADEINLEN", fadein)
-                    reaper.SetMediaItemInfo_Value(new_item, "D_FADEOUTLEN", fadeout)
-                    reaper.SetMediaItemInfo_Value(new_item, "C_FADEINSHAPE", fadeinshape)
-                    reaper.SetMediaItemInfo_Value(new_item, "C_FADEOUTSHAPE", fadeoutshape)
-                    
-                    local new_take = reaper.AddTakeToMediaItem(new_item)
-                    local source = reaper.GetMediaItemTake_Source(take)
-                    reaper.SetMediaItemTake_Source(new_take, source)
-                    
-                    local vol = reaper.GetMediaItemTakeInfo_Value(take, "D_VOL")
-                    local pan = reaper.GetMediaItemTakeInfo_Value(take, "D_PAN")
-                    local pitch = reaper.GetMediaItemTakeInfo_Value(take, "D_PITCH")
-                    local playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
-                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_VOL", vol)
-                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PAN", pan)
-                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PITCH", pitch)
-                    reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", playrate)
-                    
-                    apply_random_parameters(new_item, new_take, item, take)
-                    
-                    set_item_notes(new_item, VARIATION_TAG)
-                end
-            end
-        end
-    end
-    
-    reaper.UpdateArrange()
-    reaper.Undo_EndBlock("Duplicate original items", -1)
-    reaper.PreventUIRefresh(-1)
-end
-
-local function find_max_variation_number(base_name)
-    local max_number = 0
-    local marker_count = reaper.CountProjectMarkers(0)
-    
-    for i = 0, marker_count - 1 do
-        local _, isrgn, _, _, name, _ = reaper.EnumProjectMarkers(i)
-        if isrgn and name then
-            local pattern = base_name .. "_(%d+)$"
-            local number_str = name:match(pattern)
-            if number_str then
-                local number = tonumber(number_str)
-                if number and number > max_number then
-                    max_number = number
-                end
-            end
-        end
-    end
-    
-    return max_number
-end
-
-local function get_max_end_time(folder_track)
-    local max_end = 0
-    local child_tracks = get_child_tracks(folder_track)
-    for _, child in ipairs(child_tracks) do
-        for k = 0, reaper.CountTrackMediaItems(child) - 1 do
-            local item = reaper.GetTrackMediaItem(child, k)
-            local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-            local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-            local end_pos = pos + len
-            max_end = math.max(max_end, end_pos)
-        end
-    end
-    return max_end
-end
-
--- Función principal para crear regiones (MEJORADA para detectar jerarquías individuales)
-local function create_regions_from_subfolders()
-    valid_tracks = {}
-    region_root_data = {}
-    region_parent_data = {}
-
-    for i = 0, reaper.CountSelectedTracks(0) - 1 do
-        local subfolder = reaper.GetSelectedTrack(0, i)
-        if not is_valid_subfolder(subfolder) then goto continue end
-
-        mark_original_items(subfolder)
-
-        local sub_name = clean_name(get_track_name(subfolder))
-        
-        -- OBTENER ROOT ESPECÍFICO PARA CADA SUBFOLDER
-        local root_track = get_parent_track(subfolder)
-        local root_name = "Project"
-        
-        if root_track then
-            root_name = clean_name(get_track_name(root_track))
-        else
-            local _, project_name = reaper.EnumProjects(-1, "")
-            root_name = project_name:match("([^\\/]+)$"):gsub("%..+$", "") or "Project"
-        end
-
-        local min_start, max_end = calculate_folder_time_range(subfolder)
-        if min_start == math.huge or max_end == 0 then goto continue end
-
-        local total_duration = max_end - min_start
-        local base_name
-        
-        if prefix_type == "sx" then
-            base_name = string.format("%s_%s_%s", prefix, root_name, sub_name)
-        elseif prefix_type == "mx" then
-            base_name = string.format("%s_%s_%s_%d_%s", 
-                prefix_type, root_name, sub_name, music_bpm, music_meter)
-        elseif prefix_type == "dx" then
-            local char_field = dx_character ~= "" and dx_character or "unknown"
-            local questType_field = dx_quest_type ~= "" and dx_quest_type or "SQ"
-            local questName_field = dx_quest_name ~= "" and dx_quest_name or sub_name
-            base_name = string.format("%s_%s_%s_%s_%02d", 
-                prefix_type, char_field, questType_field, questName_field, dx_line_number)
-        elseif prefix_type == "env" then
-            base_name = string.format("env_%s_%s", root_name, sub_name)
-        end
-
-        local actual_variations = variations > 0 and variations or 1
-        local max_end_all = get_max_end_time(subfolder)
-        local base_offset = max_end_all - min_start + separation_time
-        local max_variation = find_max_variation_number(base_name)
-        
-        for variation = 1, actual_variations do
-            local rand_offset = 0
-            if variations > 0 and randomize_position > 0 then
-                rand_offset = (math.random() * 2 - 1) * randomize_position
-            end
-            
-            local time_offset = 0
-            if variations > 0 then
-                time_offset = base_offset + (variation - 1) * (total_duration + separation_time)
-                duplicate_original_items(subfolder, time_offset + rand_offset)
-            end
-            
-            local variation_number = max_variation + variation
-            local region_name = string.format("%s_%02d", base_name, variation_number)
-            
-            local region_start, region_end
-            if variations == 0 then
-                region_start = min_start
-                region_end = max_end
-            else
-                region_start = min_start + time_offset + rand_offset
-                region_end = max_end + time_offset + rand_offset
-            end
-            
-            reaper.AddProjectMarker2(0, true, region_start, region_end, region_name, -1, 0)
-            
-            -- ALMACENAR DATOS JERÁRQUICOS ESPECÍFICOS DE CADA SUBFOLDER
-            region_root_data[region_name] = root_name
-            region_parent_data[region_name] = sub_name
-            
-            table.insert(valid_tracks, { 
-                name = region_name, 
-                start = region_start,
-                end_pos = region_end,
-                variation = variation_number
-            })
-        end
-
-        ::continue::
-    end
-
-    return #valid_tracks
-end
-
--- Función para renderizado normal (mantener original)
-local function prepare_render_with_existing_regions(selected_only)
-    local regions = {}
-    
-    if selected_only then
-        local _, region_index = reaper.GetLastMarkerAndCurRegion(0, reaper.GetCursorPosition())
-        if region_index >= 0 then
-            local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(region_index)
-            if isrgn then
-                table.insert(regions, {name = name, start = pos, end_pos = rgnend})
-            else
-                reaper.ShowMessageBox("No hay región seleccionada.", "Error", 0)
-                return
-            end
-        else
-            reaper.ShowMessageBox("No hay región seleccionada.", "Error", 0)
-            return
-        end
-    else
-        local marker_count = reaper.CountProjectMarkers(0)
-        for i = 0, marker_count - 1 do
-            local _, isrgn, pos, rgnend, name, _ = reaper.EnumProjectMarkers(i)
-            if isrgn then
-                table.insert(regions, {name = name, start = pos, end_pos = rgnend})
-            end
-        end
-    end
-    
-    if #regions == 0 then
-        reaper.ShowMessageBox("No hay regiones creadas.", "Error", 0)
-        return
-    end
-    
-    local render_path = custom_output_path ~= "" and custom_output_path or reaper.GetProjectPath("") .. "/Renders/"
-    
-    local type_folder = "SFX"
-    if prefix_type == "mx" then type_folder = "Music"
-    elseif prefix_type == "dx" then type_folder = "Dialogue"
-    elseif prefix_type == "env" then type_folder = "Environment" end
-    
-    render_path = render_path .. type_folder .. "/"
-    
-    local root_folder_name = "General"
-    local first_region = regions[1].name
-    
-    if region_root_data[first_region] then
-        root_folder_name = region_root_data[first_region]
-    end
-    
-    if root_folder_name == "Root" then
-        root_folder_name = "General"
-    end
-    
-    render_path = render_path .. root_folder_name .. "/"
-    
-    reaper.RecursiveCreateDirectory(render_path, 0)
-    reaper.GetSetProjectInfo_String(0, "RENDER_FILE", render_path, true)
-    
-    local expanded_pattern = wildcard_template
-        :gsub("%$root", root_folder_name)
-        :gsub("%$parent", region_parent_data[first_region] or "Parent")
-        :gsub("%$region", first_region)
-    
-    reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", expanded_pattern, true)
-    reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "wav", true)
-    reaper.GetSetProjectInfo_String(0, "RENDER_SETTINGS", "24bit", true)
-    
-    reaper.Main_OnCommand(40015, 0)
-end
 
 local function process_subfolders()
     reaper.PreventUIRefresh(1)
@@ -1132,11 +1261,11 @@ local function browse_output_folder()
 end
 
 -- ==================================================
--- Interfaz gráfica (MEJORADA con nuevos botones)
+-- Interfaz gráfica
 -- ==================================================
 
 function loop()
-    local visible, open = reaper.ImGui_Begin(ctx, 'SFX Renderer v2.1', true, 
+    local visible, open = reaper.ImGui_Begin(ctx, 'SFX Renderer v2.2', true, 
         reaper.ImGui_WindowFlags_AlwaysAutoResize())
     
     if visible then
@@ -1334,7 +1463,12 @@ function loop()
         end
         
         reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_Button(ctx, "Prepare Render", 250, 40) then
+        if reaper.ImGui_Button(ctx, "Render All Regions", 250, 40) then
+            prepare_render_with_existing_regions(true)
+        end
+        
+        reaper.ImGui_NewLine(ctx)
+        if reaper.ImGui_Button(ctx, "Render Selected Region", 250, 40) then
             prepare_render_with_existing_regions(false)
         end
 
@@ -1384,6 +1518,12 @@ function loop()
         reaper.ImGui_SameLine(ctx)
         if reaper.ImGui_Button(ctx, "Manual Migration", 250, 30) then
             manual_region_migration()
+        end
+        
+        -- Botón para actualizar jerarquía de regiones renombradas
+        reaper.ImGui_Spacing(ctx)
+        if reaper.ImGui_Button(ctx, "Update Hierarchy", 166, 25) then
+            update_hierarchy_for_renamed_region()
         end
 
         -- Créditos
