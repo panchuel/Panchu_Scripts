@@ -20,6 +20,11 @@
 2. Place in REAPER/Scripts directory
 3. Run via: [Actions] > [Load ReaScript...]
 ```
+### Prerequisites:
+
+- REAPER 6.0 or higher
+
+- ReaImGui extension (required for GUI functionality)
 
 ### 2. Core Workflow
 ```mermaid
