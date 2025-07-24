@@ -41,7 +41,7 @@ I --> M
 ```
 
 ## 🖥️ GUI Overview
-![SFX Renderer Interface](https://github.com/user-attachments/assets/2e74c869-cd29-49b2-882c-8c2915cf0296)
+![SFX Renderer Interface](https://github.com/user-attachments/assets/f127f5c4-ed53-4126-a85b-988f695c75e6)
 
 ## 🛠️ Enhanced Toolbox: Button Reference
 
