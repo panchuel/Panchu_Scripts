@@ -1269,7 +1269,6 @@ function loop()
         reaper.ImGui_WindowFlags_AlwaysAutoResize())
     
     if visible then
-        reaper.ImGui_PushFont(ctx, font)
         
         local sel_count = reaper.CountSelectedTracks(0)
         reaper.ImGui_Text(ctx, "Selected tracks: " .. sel_count)
@@ -1532,7 +1531,6 @@ function loop()
         reaper.ImGui_Text(ctx, "Developed by Daniel \"Panchuel\" Montoya")
         reaper.ImGui_Spacing(ctx)
 
-        reaper.ImGui_PopFont(ctx)
         reaper.ImGui_End(ctx)
     end
 
