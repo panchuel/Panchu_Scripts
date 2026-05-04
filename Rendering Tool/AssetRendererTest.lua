@@ -721,9 +721,9 @@ GUI.New("sel_type", "Menubox", 2, LM + 96, y, TW - 96, 24, "",
 y = y + 36
 
 -- Track hierarchy tree view
-GUI.New("frm_tree", "Frame", 2, LM, y, TW, 108, false, true, "elm_frame", 0)
+GUI.New("lbl_tree_hdr", "Label", 2, LM, y + 4, "Hierarchy:", false, 3)
 for _i = 0, 5 do
-    GUI.New("lbl_tr" .. _i, "Label", 2, LM + 10, y + 9 + _i * 16, "", false, 4)
+    GUI.New("lbl_tr" .. _i, "Label", 2, LM + 6, y + 24 + _i * 16, "", false, 4)
 end
 y = y + 116
 
@@ -739,7 +739,11 @@ GUI.New("btn_hierarchy", "Button", 2, LM, y, TW, 34, "Update Hierarchy",
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 y = CY
 
-GUI.New("lbl_pattern_hdr", "Label", 3, LM, y, "Pattern (current type):", false, 3)
+GUI.New("lbl_atype_s", "Label",   3, LM,        y + 5,  "Audio Type:", false, 3)
+GUI.New("sel_type_s",  "Menubox", 3, LM + 96,   y, TW - 96, 24, "", table.concat(_type_names, ","))
+y = y + 36
+
+GUI.New("lbl_pattern_hdr", "Label", 3, LM, y, "Pattern:", false, 3)
 y = y + 22
 GUI.New("txt_pattern", "Textbox", 3, LM, y, TW, 24, "", 4)
 y = y + 32
@@ -757,7 +761,7 @@ local _wildcards = {
 }
 for i, wc in ipairs(_wildcards) do
     GUI.New("lbl_wc" .. i, "Label", 3, LM + 8, y, wc, false, 4)
-    y = y + 18
+    y = y + 14
 end
 
 y = y + 6
@@ -841,8 +845,12 @@ local _prev_type_idx    = 0
 local _prev_tab         = 0
 local _prev_type_name   = ""
 local _prev_state_count = -1
+local _prev_sel_track   = nil
 
 local function refresh_tree_view()
+    local L = "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 "  -- └──
+    local T = "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 "  -- ├──
+
     local sel = reaper.GetSelectedTrack(0, 0)
     if not sel then
         GUI.Val("lbl_tr0", "  No track selected")
@@ -850,41 +858,64 @@ local function refresh_tree_view()
         return
     end
 
-    local parent_name = clean_name(get_track_name(sel))
+    -- $root = parent of selected (or project name); $parent = selected track
+    local parent_name = get_track_name(sel)
     local root_folder = get_parent_track(sel)
     local root_name
     if root_folder then
-        root_name = clean_name(get_track_name(root_folder))
+        root_name = get_track_name(root_folder)
     else
         local _, proj_name = reaper.EnumProjects(-1, "")
         root_name = (proj_name:match("([^\\/]+)$") or "Project"):gsub("%..+$", "")
     end
 
-    local children = get_direct_child_tracks(sel)
-    local total    = #children
+    -- Collect all descendants that carry items (same set used by Create Regions)
+    local all_desc  = get_child_tracks(sel)
+    local item_tracks = {}
+    for _, tr in ipairs(all_desc) do
+        if reaper.CountTrackMediaItems(tr) > 0 then
+            table.insert(item_tracks, tr)
+        end
+    end
+
+    local total    = #item_tracks
     local max_show = 3
 
-    GUI.Val("lbl_tr0", "$root     " .. root_name)
-    GUI.Val("lbl_tr1", "  > $parent   " .. parent_name)
+    GUI.Val("lbl_tr0", "Root   " .. root_name)
+    GUI.Val("lbl_tr1", "  " .. L .. parent_name)
 
-    for i = 1, math.min(max_show, total) do
-        local cname = clean_name(get_track_name(children[i]))
-        local n     = reaper.CountTrackMediaItems(children[i])
-        GUI.Val("lbl_tr" .. (i + 1), "        - " .. cname .. "  [" .. n .. " items]")
+    if total == 0 then
+        GUI.Val("lbl_tr2", "        " .. L .. "(no items)")
+        for i = 3, 5 do GUI.Val("lbl_tr" .. i, "") end
+        return
     end
 
-    for i = math.min(max_show, total) + 2, 5 do
-        GUI.Val("lbl_tr" .. i, "")
+    local show = math.min(max_show, total)
+    for i = 1, show do
+        local cname     = get_track_name(item_tracks[i])
+        local n         = reaper.CountTrackMediaItems(item_tracks[i])
+        local connector = (i == total and total <= max_show) and L or T
+        GUI.Val("lbl_tr" .. (i + 1), "        " .. connector .. cname .. "   [" .. n .. " items]")
     end
+
+    for i = show + 2, 5 do GUI.Val("lbl_tr" .. i, "") end
 
     if total > max_show then
-        GUI.Val("lbl_tr5", "        ... " .. (total - max_show) .. " more")
+        GUI.Val("lbl_tr5", "           ... " .. (total - max_show) .. " more")
     end
 end
 
 GUI.func = function()
     local cur_tab      = GUI.elms.tabs.retval
     local new_type_idx = GUI.Val("sel_type")
+
+    -- Entering Settings tab: sync the secondary type selector
+    if cur_tab == 2 and _prev_tab ~= 2 then
+        GUI.Val("sel_type_s", selected_type_idx)
+    end
+
+    -- Active type index: Settings tab has its own selector
+    local effective_idx = (cur_tab == 2) and GUI.Val("sel_type_s") or new_type_idx
 
     -- ── Leaving Settings tab: persist pattern and type-specific values ──
     if _prev_tab == 2 and cur_tab ~= 2 then
@@ -900,11 +931,13 @@ GUI.func = function()
         dx_line_number = tonumber(GUI.Val("txt_line"))   or dx_line_number
     end
 
-    -- ── Audio type changed ────────────────────────────────────────────
-    if new_type_idx ~= _prev_type_idx and _prev_type_idx > 0 then
+    -- ── Audio type changed (either selector) ─────────────────────────
+    if effective_idx ~= _prev_type_idx and _prev_type_idx > 0 then
         sync_config_to_audio_type()
-        selected_type_idx = new_type_idx
+        selected_type_idx = effective_idx
         sync_config_from_audio_type()
+        GUI.Val("sel_type",   selected_type_idx)
+        GUI.Val("sel_type_s", selected_type_idx)
         -- Refresh Settings tab fields
         GUI.Val("txt_pattern", wildcard_template)
         GUI.Val("txt_bpm",     tostring(music_bpm))
@@ -930,14 +963,16 @@ GUI.func = function()
         _prev_type_name = type_name
     end
 
-    -- ── Tree view: refresh on project state change ────────────────────
-    local sc = reaper.GetProjectStateChangeCount(0)
-    if sc ~= _prev_state_count then
+    -- ── Tree view: refresh on project state OR selection change ──────
+    local sc      = reaper.GetProjectStateChangeCount(0)
+    local cur_sel = reaper.GetSelectedTrack(0, 0)
+    if sc ~= _prev_state_count or cur_sel ~= _prev_sel_track then
         refresh_tree_view()
         _prev_state_count = sc
+        _prev_sel_track   = cur_sel
     end
 
-    _prev_type_idx = new_type_idx
+    _prev_type_idx = effective_idx
     _prev_tab      = cur_tab
 end
 
@@ -982,6 +1017,7 @@ local function script()
 
     -- Initial values
     GUI.Val("sel_type",    selected_type_idx)
+    GUI.Val("sel_type_s",  selected_type_idx)
     GUI.Val("txt_pattern", wildcard_template)
     GUI.Val("txt_bpm",     tostring(music_bpm))
     GUI.Val("txt_meter",   music_meter)
@@ -1003,6 +1039,8 @@ local function script()
     GUI.elms_hide[6] = true
 
     _prev_type_idx = selected_type_idx
+
+    refresh_tree_view()
 
     reaper.defer(GUI.Main)
 end
