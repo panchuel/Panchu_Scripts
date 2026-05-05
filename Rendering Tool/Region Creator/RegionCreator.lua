@@ -24,6 +24,7 @@ for _, m in ipairs({
     "track_utils.lua",
     "wildcards.lua",
     "regions.lua",
+    "render.lua",
     "gui.lua",
 }) do
     if not load_module(m) then return end
