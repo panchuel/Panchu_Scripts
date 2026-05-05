@@ -29,16 +29,95 @@ GUI.Draw_Version = function()
     gfx.drawstr(str)
 end
 
+-- ── RC_Checklist: custom checkbox list (no external class needed) ────
+GUI.RC_Checklist = {}
+GUI.RC_Checklist.__index = GUI.RC_Checklist
+
+function GUI.RC_Checklist:new(name, z, x, y, w, h)
+    local e = setmetatable({}, self)
+    e.name     = name
+    e.type     = "RC_Checklist"
+    e.z        = z
+    e.x, e.y, e.w, e.h = x, y, w, h
+    e.optarray = {}
+    e.optsel   = {}
+    e.numopts  = 0
+    e.item_h   = 19
+    return e
+end
+
+function GUI.RC_Checklist:init()             end
+function GUI.RC_Checklist:onupdate()         end
+function GUI.RC_Checklist:onresize()         end
+function GUI.RC_Checklist:lostfocus()        end
+function GUI.RC_Checklist:getfocus()         end
+function GUI.RC_Checklist:onmouseover()      end
+function GUI.RC_Checklist:onmousedown()      end
+function GUI.RC_Checklist:ondrag()           end
+function GUI.RC_Checklist:ondoubleclick()    end
+function GUI.RC_Checklist:onwheel()          end
+function GUI.RC_Checklist:ontype()           end
+function GUI.RC_Checklist:onmouser_down()    end
+function GUI.RC_Checklist:onr_drag()         end
+function GUI.RC_Checklist:onmouser_up()      end
+function GUI.RC_Checklist:onr_doubleclick()  end
+function GUI.RC_Checklist:onmousem_down()    end
+function GUI.RC_Checklist:onm_drag()         end
+function GUI.RC_Checklist:onmousem_up()      end
+function GUI.RC_Checklist:onm_doubleclick()  end
+function GUI.RC_Checklist:redraw()           end
+
+function GUI.RC_Checklist:draw()
+    local x, y, w, h = self.x, self.y, self.w, self.h
+    GUI.color("elm_bg")
+    gfx.rect(x, y, w, h, true)
+    GUI.color("elm_frame")
+    gfx.rect(x, y, w, h, false)
+    if self.numopts == 0 then return end
+    GUI.font(4)
+    local ih   = self.item_h
+    local maxv = math.floor((h - 4) / ih)
+    for i = 1, math.min(self.numopts, maxv) do
+        local iy = y + (i - 1) * ih + 3
+        GUI.color("elm_frame")
+        gfx.rect(x + 5, iy + 2, 12, 12, false)
+        if self.optsel[i] then
+            GUI.color("elm_fill")
+            gfx.rect(x + 7, iy + 4, 8, 8, true)
+        end
+        GUI.color("txt")
+        gfx.x, gfx.y = x + 24, iy + 1
+        gfx.drawstr(self.optarray[i] or "")
+    end
+    if self.numopts > maxv then
+        GUI.color("elm_frame")
+        gfx.x, gfx.y = x + 5, y + h - ih + 2
+        gfx.drawstr(string.format("... +%d more (click Refresh)", self.numopts - maxv))
+    end
+end
+
+function GUI.RC_Checklist:onmousedown()
+    local rel_y = GUI.mouse.y - self.y - 3
+    local idx   = math.floor(rel_y / self.item_h) + 1
+    if idx >= 1 and idx <= self.numopts then
+        self.optsel[idx] = not self.optsel[idx]
+        if GUI.redraw_z then GUI.redraw_z[self.z] = true end
+    end
+end
+
+function GUI.RC_Checklist:onmouseup() end
+
 -- ── Window ───────────────────────────────────────────────────────────
 GUI.name   = "Region Creator v1.0"
-GUI.w, GUI.h = 460, 420
+GUI.w, GUI.h = 460, 550
+GUI.fonts[5] = {"Calibri", 11}
 GUI.anchor, GUI.corner = "screen", "C"
 
 -- ── Layout constants ─────────────────────────────────────────────────
 local LM    = 16
 local TW    = GUI.w - LM * 2
-local TAB_H = 20
-local CY    = TAB_H + 8   -- content start Y = 28
+local TAB_H = 16
+local CY    = TAB_H + 6   -- content start Y = 22
 
 -- ── Z-layer map ──────────────────────────────────────────────────────
 --  1 = Tabs bar (always visible)
@@ -49,7 +128,7 @@ local CY    = TAB_H + 8   -- content start Y = 28
 --  6 = Dialogue-specific (managed manually)
 
 -- ── Tabs ─────────────────────────────────────────────────────────────
-GUI.New("tabs", "Tabs", 1, 0, 0, 148, TAB_H, "Main,Settings,Audio Types", 4)
+GUI.New("tabs", "Tabs", 1, 0, 0, 100, TAB_H, "Main,Settings,Audio Types,Render", 4)
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- TAB 1 — MAIN  (z=2)
@@ -178,20 +257,149 @@ GUI.New("btn_reset_types", "Button", 4, LM + BW + 8, y, BW, 30, "Reset to Defaul
         for i, at in ipairs(RC.audio_types) do
             GUI.Val("txt_atpfx" .. i, at.prefix)
             GUI.Val("txt_atpat" .. i, at.wildcard)
+            GUI.Val("txt_rpath" .. i, at.path_pattern or "{base}/$prefix/$root/$parent/")
         end
         GUI.Val("txt_pattern", RC.wildcard_template)
         reaper.MB("Audio types reset to defaults.", "Reset Complete", 0)
     end
 end)
 
+-- ── Region list builder ──────────────────────────────────────────────
+local function populate_region_checklist()
+    RC.region_list = {}
+    for i = 0, reaper.CountProjectMarkers(0) - 1 do
+        local _, isrgn, pos, rend, name = reaper.EnumProjectMarkers(i)
+        if isrgn then
+            local id    = string.format("%.10f_%.10f", pos, rend)
+            local badge = ""
+            for _, t in ipairs(RC.audio_types) do
+                if name:sub(1, #t.prefix + 1) == t.prefix .. "_" then
+                    badge = "[" .. t.prefix .. "] "
+                    break
+                end
+            end
+            RC.region_list[#RC.region_list + 1] = { id = id, raw_name = name, display = badge .. name }
+        end
+    end
+    local chk = GUI.elms.chk_regions
+    if not chk then return end
+    if #RC.region_list == 0 then
+        chk.optarray = { "(no regions in project)" }
+        chk.numopts  = 1
+        chk.optsel   = { false }
+    else
+        local opts = {}
+        for _, r in ipairs(RC.region_list) do opts[#opts + 1] = r.display end
+        chk.optarray = opts
+        chk.numopts  = #opts
+        chk.optsel   = {}
+        for i = 1, #opts do chk.optsel[i] = true end
+    end
+end
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TAB 4 — RENDER  (z=7)
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+y = CY
+
+GUI.New("lbl_rpath_hdr", "Label", 7, LM, y, "Output paths:", false, 3)
+y = y + 18
+GUI.New("lbl_base_note", "Label", 7, LM + 8, y, "{base}  =  <ProjectFolder>/Renders", false, 4)
+y = y + 18
+
+for _i, _at in ipairs(RC.audio_types) do
+    GUI.New("lbl_rpath" .. _i, "Label",   7, LM,      y + 5, _at.name .. ":", false, 3)
+    GUI.New("txt_rpath" .. _i, "Textbox", 7, LM + 90, y, TW - 90, 24, "", 4)
+    y = y + 32
+end
+
+y = y + 2
+GUI.New("btn_save_paths", "Button", 7, LM, y, TW, 26, "Save Output Paths", function()
+    for i = 1, #RC.audio_types do
+        RC.audio_types[i].path_pattern = GUI.Val("txt_rpath" .. i) or RC.audio_types[i].path_pattern
+    end
+    save_audio_types(RC.audio_types)
+    reaper.MB("Output paths saved.", "Saved", 0)
+end)
+y = y + 34
+
+GUI.New("frm_sep_r", "Frame", 7, LM, y, TW, 2, false, true, "elm_frame", 0)
+y = y + 12
+
+local _BH = math.floor((TW - 8) / 3)
+GUI.New("lbl_rgn_hdr", "Label",  7, LM,              y + 5, "Regions:", false, 3)
+GUI.New("btn_refresh",  "Button", 7, LM + TW - 70,   y,     70, 22, "Refresh", function()
+    populate_region_checklist()
+end)
+y = y + 30
+
+-- z=9: checklist + selection buttons (shown together with z=7 on Render tab)
+GUI.New("chk_regions", "RC_Checklist", 9, LM, y, TW, 130)
+y = y + 136
+
+GUI.New("btn_sel_all",  "Button", 9, LM,               y, _BH, 22, "Select All", function()
+    local chk = GUI.elms.chk_regions
+    for i = 1, chk.numopts do chk.optsel[i] = true end
+end)
+GUI.New("btn_sel_none", "Button", 9, LM + _BH + 4,     y, _BH, 22, "None", function()
+    local chk = GUI.elms.chk_regions
+    for i = 1, chk.numopts do chk.optsel[i] = false end
+end)
+GUI.New("btn_filter",   "Button", 9, LM + (_BH + 4)*2, y, TW - (_BH + 4)*2, 22,
+    "Filter by Type", function()
+        if not RC.region_list then return end
+        local pfx = (RC.audio_types[RC.selected_type_idx] or {}).prefix or ""
+        local chk = GUI.elms.chk_regions
+        for i, r in ipairs(RC.region_list) do
+            chk.optsel[i] = r.raw_name:sub(1, #pfx + 1) == pfx .. "_"
+        end
+    end)
+y = y + 30
+
+GUI.New("frm_sep_r2", "Frame", 7, LM, y, TW, 2, false, true, "elm_frame", 0)
+y = y + 10
+
+GUI.New("btn_render", "Button", 7, LM, y, TW, 40, "Render Selected", function()
+    local ids = {}
+    local chk = GUI.elms.chk_regions
+    if chk and RC.region_list then
+        for i, sel in ipairs(chk.optsel) do
+            if sel and RC.region_list[i] then ids[#ids + 1] = RC.region_list[i].id end
+        end
+    end
+    RC.render_status = "Rendering..."
+    render_queue(ids)
+end)
+y = y + 48
+
+GUI.New("btn_open_folder", "Button", 7, LM, y, math.floor(TW / 2) - 4, 22, "Open Folder", function()
+    local d = RC.last_render_dir
+    if d and d ~= "" then
+        os.execute('explorer "' .. d:gsub("/", "\\") .. '"')
+    else
+        reaper.MB("Render a region first.", "Open Folder", 0)
+    end
+end)
+y = y + 30
+
+GUI.New("lbl_render_status", "Label", 7, LM, y, "Ready", false, 5)
+
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- UPDATE FUNCTION  (runs every frame)
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-local _prev_type_idx    = 0
-local _prev_tab         = 0
-local _prev_type_name   = ""
-local _prev_state_count = -1
-local _prev_sel_track   = nil
+local _prev_type_idx      = 0
+local _prev_tab           = 0
+local _prev_type_name     = ""
+local _prev_state_count   = -1
+local _prev_sel_track     = nil
+local _prev_render_status = ""
+
+-- Keeps sel_type (Main) and sel_type_s (Settings) in sync with a given index.
+-- Call whenever RC.selected_type_idx changes from any tab.
+local function sync_type_selectors(idx)
+    GUI.Val("sel_type",   idx)
+    GUI.Val("sel_type_s", idx)
+end
 
 local function refresh_tree_view()
     local L = "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 "  -- └──
@@ -252,7 +460,7 @@ GUI.func = function()
     local new_type_idx = GUI.Val("sel_type")
 
     if cur_tab == 2 and _prev_tab ~= 2 then
-        GUI.Val("sel_type_s", RC.selected_type_idx)
+        sync_type_selectors(RC.selected_type_idx)
     end
 
     local effective_idx = (cur_tab == 2) and GUI.Val("sel_type_s") or new_type_idx
@@ -274,8 +482,7 @@ GUI.func = function()
         sync_config_to_audio_type()
         RC.selected_type_idx = effective_idx
         sync_config_from_audio_type()
-        GUI.Val("sel_type",    RC.selected_type_idx)
-        GUI.Val("sel_type_s",  RC.selected_type_idx)
+        sync_type_selectors(RC.selected_type_idx)
         GUI.Val("txt_pattern", RC.wildcard_template)
         GUI.Val("txt_bpm",     tostring(RC.music_bpm))
         GUI.Val("txt_meter",   RC.music_meter)
@@ -291,6 +498,15 @@ GUI.func = function()
 
     GUI.elms_hide[5] = not (on_settings and type_name == "Music")
     GUI.elms_hide[6] = not (on_settings and type_name == "Dialogue")
+
+    local on_render = (cur_tab == 4)
+    if on_render then
+        if _prev_tab ~= 4 then populate_region_checklist() end
+        if RC.render_status ~= _prev_render_status then
+            GUI.Val("lbl_render_status", RC.render_status)
+            _prev_render_status = RC.render_status
+        end
+    end
 
     if type_name ~= _prev_type_name then
         if     type_name == "Music"    then GUI.Val("lbl_type_cfg", "Music settings:")
@@ -324,8 +540,9 @@ GUI.exit = function()
     RC.dx_line_number     = tonumber(GUI.Val("txt_line"))   or RC.dx_line_number
 
     for i = 1, #RC.audio_types do
-        RC.audio_types[i].prefix   = GUI.Val("txt_atpfx" .. i) or RC.audio_types[i].prefix
-        RC.audio_types[i].wildcard = GUI.Val("txt_atpat" .. i) or RC.audio_types[i].wildcard
+        RC.audio_types[i].prefix       = GUI.Val("txt_atpfx" .. i) or RC.audio_types[i].prefix
+        RC.audio_types[i].wildcard     = GUI.Val("txt_atpat" .. i) or RC.audio_types[i].wildcard
+        RC.audio_types[i].path_pattern = GUI.Val("txt_rpath"  .. i) or RC.audio_types[i].path_pattern
     end
     if RC.audio_types[RC.selected_type_idx] then
         RC.audio_types[RC.selected_type_idx].wildcard = RC.wildcard_template
@@ -350,8 +567,7 @@ function gui_start()
     local function script()
         GUI.Init()
 
-        GUI.Val("sel_type",    RC.selected_type_idx)
-        GUI.Val("sel_type_s",  RC.selected_type_idx)
+        sync_type_selectors(RC.selected_type_idx)
         GUI.Val("txt_pattern", RC.wildcard_template)
         GUI.Val("txt_bpm",     tostring(RC.music_bpm))
         GUI.Val("txt_meter",   RC.music_meter)
@@ -363,13 +579,17 @@ function gui_start()
         for i, at in ipairs(RC.audio_types) do
             GUI.Val("txt_atpfx" .. i, at.prefix)
             GUI.Val("txt_atpat" .. i, at.wildcard)
+            GUI.Val("txt_rpath" .. i, at.path_pattern or "{base}/$prefix/$root/$parent/")
         end
 
-        GUI.elms.tabs:update_sets({ {2}, {3}, {4} })
+        GUI.Val("lbl_render_status", RC.render_status)
+
+        GUI.elms.tabs:update_sets({ {2}, {3}, {4}, {7, 9} })
         GUI.elms_hide[5] = true
         GUI.elms_hide[6] = true
 
-        _prev_type_idx = RC.selected_type_idx
+        _prev_type_idx      = RC.selected_type_idx
+        _prev_render_status = RC.render_status
         refresh_tree_view()
 
         reaper.defer(GUI.Main)

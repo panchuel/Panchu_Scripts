@@ -5,18 +5,22 @@ RC.VARIATION_TAG = "SFX_VARIATION"
 RC.default_audio_types = {
     {
         name = "SFX", prefix = "sx", wildcard = "$prefix_$root_$parent_",
+        path_pattern = "{base}/$prefix/$root/$parent/",
         config = { bpm=0, meter="", character="", quest_type="", quest_name="", line_number=1 },
     },
     {
         name = "Music", prefix = "mx", wildcard = "$prefix_$root_$parent_$bpm_$meter_",
+        path_pattern = "{base}/$prefix/$root/$parent/",
         config = { bpm=120, meter="4-4", character="", quest_type="", quest_name="", line_number=1 },
     },
     {
         name = "Dialogue", prefix = "dx", wildcard = "$prefix_$character_$questtype_$questname_$line_",
+        path_pattern = "{base}/$prefix/$root/$parent/",
         config = { bpm=0, meter="", character="", quest_type="SQ", quest_name="", line_number=1 },
     },
     {
         name = "Environment", prefix = "env", wildcard = "$prefix_$root_$parent_",
+        path_pattern = "{base}/$prefix/$root/$parent/",
         config = { bpm=0, meter="", character="", quest_type="", quest_name="", line_number=1 },
     },
 }
