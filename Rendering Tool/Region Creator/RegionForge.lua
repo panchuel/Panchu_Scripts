@@ -1,7 +1,17 @@
---@description RegionForge
+--@description RegionForge — Hierarchical region creation & batch render for REAPER
 --@version 1.0
---@author Panchu
---@provides [main] .
+--@author Panchuel
+--@link https://github.com/panchuel/Panchu_Scripts
+--@provides
+--  [main] RegionForge.lua
+--  src/config.lua
+--  src/audio_types.lua
+--  src/settings.lua
+--  src/track_utils.lua
+--  src/wildcards.lua
+--  src/regions.lua
+--  src/render.lua
+--  src/gui.lua
 
 RC = {}   -- shared namespace; all modules read/write through this table
 
