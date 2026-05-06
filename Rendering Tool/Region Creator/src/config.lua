@@ -38,6 +38,7 @@ RC.default_settings = {
     dx_quest_type      = "SQ",
     dx_quest_name      = "",
     dx_line_number     = 1,
+    render_base_dir    = "",
     volume_enable      = false,  volume_amount   = 3.0,
     pan_enable         = false,  pan_amount      = 0.1,
     pitch_enable       = false,  pitch_amount    = 0.5,

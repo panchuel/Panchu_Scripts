@@ -305,8 +305,76 @@ y = CY  -- 48
 
 GUI.New("lbl_rpath_hdr", "Label", 7, LM, y, "Output paths:", false, 3)
 y = y + 18
-GUI.New("lbl_base_note", "Label", 7, LM + 8, y, "{base}  =  <ProjectFolder>/Renders", false, 4)
-y = y + 18
+
+GUI.New("lbl_base_lbl",   "Label",   7, LM,             y + 5, "Base folder:", false, 3)
+GUI.New("txt_base_dir",   "Textbox", 7, LM + 90,        y,     TW - 90 - 74, 24, "", 4)
+GUI.New("btn_browse_base","Button",  7, LM + TW - 70,   y,     70, 24, "Browse...", function()
+    local sep     = package.config:sub(1, 1)
+    local tmp     = reaper.GetResourcePath() .. sep .. "Scripts"
+    local out     = tmp .. sep .. "rf_browse.txt"
+    local os_name = reaper.GetOS() or ""
+    os.remove(out)
+
+    local init = (RC.render_base_dir ~= "" and RC.render_base_dir
+                 or reaper.GetProjectPath(0)):gsub(sep == "\\" and "/" or "\\", sep)
+
+    local script_file  -- holds the temp script path for cleanup in poll
+
+    if sep == "\\" then
+        -- ── Windows: PowerShell + OpenFileDialog (modern Explorer dialog) ──
+        script_file = tmp .. "\\rf_browse.ps1"
+        local f = io.open(script_file, "w")
+        if not f then return end
+        f:write('Add-Type -AssemblyName System.Windows.Forms\n')
+        f:write('$d = New-Object System.Windows.Forms.OpenFileDialog\n')
+        f:write('$d.Title           = "Select base render folder"\n')
+        f:write('$d.CheckFileExists = $false\n')
+        f:write('$d.CheckPathExists = $true\n')
+        f:write('$d.ValidateNames   = $false\n')
+        f:write('$d.FileName        = "Select folder."\n')
+        f:write(string.format('$d.InitialDirectory = "%s"\n', init:gsub('"', '`"')))
+        f:write('$p = if ($d.ShowDialog() -eq "OK") { Split-Path $d.FileName } else { "" }\n')
+        f:write(string.format('[IO.File]::WriteAllText("%s", $p, [Text.UTF8Encoding]::new($false))\n',
+            out:gsub('"', '`"')))
+        f:close()
+        os.execute(string.format(
+            'start "" /B powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%s"',
+            script_file))
+    else
+        -- ── Mac / Linux: shell script writes result then exits ─────────
+        script_file = tmp .. "/rf_browse.sh"
+        local f = io.open(script_file, "w")
+        if not f then return end
+        f:write("#!/bin/sh\n")
+        if os_name:find("OSX") or os_name:find("macOS") then
+            f:write(string.format(
+                'result=$(osascript -e \'POSIX path of (choose folder with prompt "Select base render folder" default location POSIX file "%s")\' 2>/dev/null)\n',
+                init:gsub("'", "'\\''")))
+        else
+            f:write(string.format(
+                'result=$(zenity --file-selection --directory --title="Select base render folder" --filename="%s/" 2>/dev/null || kdialog --getexistingdirectory "%s" 2>/dev/null)\n',
+                init:gsub('"', '\\"'), init:gsub('"', '\\"')))
+        end
+        f:write(string.format('printf "%%s" "$result" > "%s"\n', out:gsub('"', '\\"')))
+        f:close()
+        os.execute("sh '" .. script_file:gsub("'", "'\\''") .. "' &")
+    end
+
+    local function poll()
+        local r = io.open(out, "r")
+        if not r then reaper.defer(poll); return end
+        local path = r:read("*a"):gsub("^%s+", ""):gsub("[/\\]*%s*$", "")
+        r:close()
+        os.remove(out)
+        os.remove(script_file)
+        if path ~= "" then
+            RC.render_base_dir = path
+            GUI.Val("txt_base_dir", path)
+        end
+    end
+    reaper.defer(poll)
+end)
+y = y + 32
 
 for _i, _at in ipairs(RC.audio_types) do
     GUI.New("lbl_rpath" .. _i, "Label",   7, LM,      y + 5, _at.name .. ":", false, 3)
@@ -334,8 +402,8 @@ GUI.New("btn_refresh",  "Button", 7, LM + TW - 70, y,     70, 22, "Refresh", fun
 end)
 y = y + 30
 
-GUI.New("chk_regions", "RC_Checklist", 9, LM, y, TW, 130)
-y = y + 136
+GUI.New("chk_regions", "RC_Checklist", 9, LM, y, TW, 116)
+y = y + 122
 
 GUI.New("btn_sel_all",  "Button", 9, LM,               y, _BH, 22, "Select All", function()
     local chk = GUI.elms.chk_regions
@@ -378,7 +446,7 @@ y = y + 48
 GUI.New("btn_open_folder", "Button", 7, LM, y, math.floor(TW / 2) - 4, 22, "Open Folder", function()
     local d = RC.last_render_dir
     if d and d ~= "" then
-        os.execute('explorer "' .. d:gsub("/", "\\") .. '"')
+        os.execute('start "" "' .. d:gsub("/", "\\") .. '"')
     else
         reaper.MB("Render a region first.", "Open Folder", 0)
     end
@@ -502,6 +570,7 @@ GUI.func = function()
     -- Render tab (tab 3)
     local on_render = (cur_tab == 3)
     if on_render then
+        RC.render_base_dir = GUI.Val("txt_base_dir") or ""
         if _prev_tab ~= 3 then populate_region_checklist() end
         if RC.render_status ~= _prev_render_status then
             GUI.Val("lbl_render_status", RC.render_status)
@@ -524,6 +593,7 @@ end
 GUI.freq = 0
 
 GUI.exit = function()
+    RC.render_base_dir    = GUI.Val("txt_base_dir")         or RC.render_base_dir
     RC.wildcard_template  = GUI.Val("txt_pattern")         or RC.wildcard_template
     RC.music_bpm          = tonumber(GUI.Val("txt_bpm"))   or RC.music_bpm
     RC.music_meter        = GUI.Val("txt_meter")            or RC.music_meter
@@ -543,6 +613,7 @@ GUI.exit = function()
     sync_config_to_audio_type()
 
     save_settings({
+        render_base_dir   = RC.render_base_dir,
         wildcard_template = RC.wildcard_template,
         prefix_type       = RC.prefix_type,
         music_bpm         = RC.music_bpm,
@@ -561,6 +632,7 @@ function gui_start()
         GUI.Init()
 
         GUI.Val("sel_type",    RC.selected_type_idx)
+        GUI.Val("txt_base_dir", RC.render_base_dir or "")
         GUI.Val("txt_pattern", RC.wildcard_template)
         GUI.Val("txt_bpm",     tostring(RC.music_bpm))
         GUI.Val("txt_meter",   RC.music_meter)

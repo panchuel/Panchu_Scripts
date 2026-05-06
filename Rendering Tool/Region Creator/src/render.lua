@@ -3,6 +3,9 @@
 -- All three are global so gui.lua can call them from button callbacks.
 
 local function resolve_base()
+    if RC.render_base_dir and RC.render_base_dir ~= "" then
+        return RC.render_base_dir
+    end
     local p = reaper.GetProjectPath(0)
     if not p or p == "" then p = reaper.GetResourcePath() end
     return p .. "/Renders"

@@ -36,6 +36,7 @@ RC.dx_character       = s.dx_character
 RC.dx_quest_type      = s.dx_quest_type
 RC.dx_quest_name      = s.dx_quest_name
 RC.dx_line_number     = s.dx_line_number
+RC.render_base_dir    = s.render_base_dir
 
 RC.random_params = {
     volume    = { enable = s.volume_enable,    amount = s.volume_amount   },
@@ -93,8 +94,9 @@ local function ensure_rc_complete()
         }
     end
     -- Render fields (also initialized by render.lua, but guarded here as fallback)
-    if RC.render_status == nil then RC.render_status = "Ready" end
-    if RC.render_mode   == nil then RC.render_mode   = 1       end
+    if RC.render_status   == nil then RC.render_status   = "Ready" end
+    if RC.render_mode     == nil then RC.render_mode     = 1       end
+    if RC.render_base_dir == nil then RC.render_base_dir = ""      end
     -- Ensure each audio type has path_pattern (may be absent if loaded from v1/v2 ExtState)
     for i, t in ipairs(RC.audio_types or {}) do
         if not t.path_pattern or t.path_pattern == "" then
