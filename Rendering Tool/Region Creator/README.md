@@ -1,4 +1,4 @@
-# 🎚️ Region Creator v1.0 - Hierarchical Region Generation for REAPER
+# 🎚️ RegionForge v1.0 - Hierarchical Region Generation for REAPER
 
 **Automated region creation from track folder structure with per-type wildcard naming and persistent settings**
 
@@ -17,8 +17,8 @@
 
 ### 1. Installation
 ```
-1. Copy the "Region Creator/" folder to your REAPER Scripts directory
-2. In REAPER: Actions > Load ReaScript > select RegionCreator.lua
+1. Copy the "RegionForge/" folder to your REAPER Scripts directory
+2. In REAPER: Actions > Load ReaScript > select RegionForge.lua
 3. Optionally assign a keyboard shortcut or toolbar button
 ```
 
@@ -137,8 +137,8 @@ A valid parent folder must have `I_FOLDERDEPTH == 1` and at least one child trac
 ## 🗂️ File Structure
 
 ```
-Region Creator/
-├── RegionCreator.lua       # Controller — REAPER action entry point
+RegionForge/
+├── RegionForge.lua       # Controller — REAPER action entry point
 └── src/
     ├── config.lua          # Defaults: audio types, settings constants
     ├── audio_types.lua     # Audio type CRUD + sync helpers
@@ -149,7 +149,7 @@ Region Creator/
     └── gui.lua             # Lokasenna UI + gui_start()
 ```
 
-All modules share a single global namespace table `RC`. `RegionCreator.lua` initializes it as `RC = {}` and loads each module sequentially via `loadfile`.
+All modules share a single global namespace table `RC`. `RegionForge.lua` initializes it as `RC = {}` and loads each module sequentially via `loadfile`.
 
 ---
 

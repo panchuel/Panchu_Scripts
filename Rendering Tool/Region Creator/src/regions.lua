@@ -121,8 +121,9 @@ local function create_regions_from_folder_structure()
         if min_s == math.huge or max_e == 0 then goto continue end
 
         local region_name = expand_wildcards(atype.wildcard, atype.prefix, root_name, folder_name)
-        local idx = reaper.AddProjectMarker2(0, true, min_s, max_e, region_name, -1, 0)
-        update_region_hierarchy(idx, root_name, folder_name)
+        reaper.AddProjectMarker2(0, true, min_s, max_e, region_name, -1, 0)
+        local region_id = string.format("%.10f_%.10f", min_s, max_e)
+        RC.region_hierarchy_data[region_id] = { root = root_name, parent = folder_name }
 
         table.insert(RC.valid_tracks, {
             name = region_name, start = min_s, end_pos = max_e, variation = 1,
@@ -174,7 +175,7 @@ function validate_preconditions()
         local choice = reaper.ShowMessageBox(
             "This project has never been saved.\n\n" ..
             "The region root name will default to \"Project\".\n\nContinue anyway?",
-            "Region Creator — Unsaved Project", 4)
+            "RegionForge — Unsaved Project", 4)
         if choice ~= 6 then return false, "" end
     end
 
@@ -197,7 +198,7 @@ function create_regions()
     local valid, msg = validate_preconditions()
     if not valid then
         if msg ~= "" then
-            reaper.ShowMessageBox(msg, "Region Creator — Cannot Proceed", 0)
+            reaper.ShowMessageBox(msg, "RegionForge — Cannot Proceed", 0)
         end
         reaper.PreventUIRefresh(-1)
         reaper.Undo_EndBlock("Create Regions", -1)
@@ -219,8 +220,8 @@ function create_regions()
 
     if not ok then
         reaper.ShowMessageBox(
-            "Unexpected error in Region Creator:\n\n" .. tostring(err),
-            "Region Creator — Error", 0)
+            "Unexpected error in RegionForge:\n\n" .. tostring(err),
+            "RegionForge — Error", 0)
     end
 end
 

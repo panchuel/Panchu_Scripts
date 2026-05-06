@@ -8,32 +8,6 @@ local function resolve_base()
     return p .. "/Renders"
 end
 
--- Expand path_pattern using wildcards, after temporarily loading the
--- given audio type's config into RC so expand_wildcards reads correct values.
-local function expand_path(path_pattern, atype, root, parent)
-    local base = resolve_base()
-    local p = path_pattern:gsub("{base}", base)
-
-    local snap = {
-        music_bpm      = RC.music_bpm,
-        music_meter    = RC.music_meter,
-        dx_character   = RC.dx_character,
-        dx_quest_type  = RC.dx_quest_type,
-        dx_quest_name  = RC.dx_quest_name,
-        dx_line_number = RC.dx_line_number,
-    }
-    if atype.config then
-        RC.music_bpm      = atype.config.bpm         or RC.music_bpm
-        RC.music_meter    = atype.config.meter        or RC.music_meter
-        RC.dx_character   = atype.config.character    or RC.dx_character
-        RC.dx_quest_type  = atype.config.quest_type   or RC.dx_quest_type
-        RC.dx_quest_name  = atype.config.quest_name   or RC.dx_quest_name
-        RC.dx_line_number = atype.config.line_number  or RC.dx_line_number
-    end
-    local expanded = expand_wildcards(p, atype.prefix, root, parent)
-    for k, v in pairs(snap) do RC[k] = v end
-    return expanded
-end
 
 local function normalize_path(p)
     if package.config:sub(1, 1) == "\\" then
@@ -82,9 +56,11 @@ function render_region(region_id)
     local parent = hier.parent or "Unknown"
     local atype  = type_for_region(region.name)
 
-    local out_dir  = expand_path(
-        atype.path_pattern or "{base}/$prefix/$root/$parent/", atype, root, parent)
-    local filename = expand_wildcards(atype.wildcard, atype.prefix, root, parent)
+    local base    = resolve_base()
+    local out_dir = (atype.path_pattern or "{base}/$prefix/$root/$parent/"):gsub("{base}", base)
+    out_dir       = expand_wildcards(out_dir, atype.prefix, root, parent)
+    -- Use the region name directly: it was already expanded with the correct values at creation time.
+    local filename = region.name
 
     out_dir = normalize_path(out_dir:gsub("[/\\]+$", ""))
     ensure_dir(out_dir)
