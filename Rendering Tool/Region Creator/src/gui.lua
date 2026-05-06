@@ -20,7 +20,7 @@ if missing_lib then error("missing Lokasenna class") end
 -- ── Footer override ──────────────────────────────────────────────────
 GUI.version = 0
 GUI.Draw_Version = function()
-    local str = "RegionForge v1.0  \xe2\x80\x94  by Panchuel"
+    local str = "RegionForge v1.1  \xe2\x80\x94  by Panchuel"
     GUI.font(4)
     GUI.color("txt")
     local sw, sh = gfx.measurestr(str)
@@ -108,7 +108,7 @@ end
 function GUI.RC_Checklist:onmouseup() end
 
 -- ── Window ───────────────────────────────────────────────────────────
-GUI.name   = "RegionForge v1.0"
+GUI.name   = "RegionForge v1.1"
 GUI.w, GUI.h = 460, 580
 GUI.fonts[5] = {"Calibri", 11}
 GUI.anchor, GUI.corner = "screen", "C"

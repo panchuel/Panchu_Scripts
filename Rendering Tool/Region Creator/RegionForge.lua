@@ -1,5 +1,5 @@
 --@description RegionForge — Hierarchical region creation & batch render for REAPER
---@version 1.0
+--@version 1.1
 --@author Panchuel
 --@link https://github.com/panchuel/Panchu_Scripts
 --@provides
