@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" name="Panchu Scripts">
+  <category name="Rendering">
+    <reapack name="RegionForge.lua" type="script"
+             desc="RegionForge — Hierarchical region creation &amp; batch render">
+      <metadata>
+        <description><![CDATA[
+Hierarchical region creation and batch render tool for REAPER.
+
+Creates regions from your track folder structure with per-type wildcard naming
+(SFX, Music, Dialogue, Environment), then batch-renders them to organized output
+folders. All settings persist between sessions via REAPER ExtState.
+
+Features:
+- Wildcard token naming: $prefix, $root, $parent, $bpm, $meter, $character, $questname, $line
+- Four built-in audio types with independent configs
+- Live hierarchy tree preview on the Main tab
+- Batch render with region checklist, Select All / None / Filter by Type
+- Output path templates per audio type
+        ]]></description>
+        <link rel="website">https://github.com/panchuel/Panchu_Scripts</link>
+      </metadata>
+      <version name="1.0" author="Panchuel" time="2026-05-06T00:00:00Z">
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source file="RegionForge.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/RegionForge.lua</source>
+        <source file="src/config.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/config.lua</source>
+        <source file="src/audio_types.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/audio_types.lua</source>
+        <source file="src/settings.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/settings.lua</source>
+        <source file="src/track_utils.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/track_utils.lua</source>
+        <source file="src/wildcards.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/wildcards.lua</source>
+        <source file="src/regions.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/regions.lua</source>
+        <source file="src/render.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/render.lua</source>
+        <source file="src/gui.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/gui.lua</source>
+      </version>
+    </reapack>
+  </category>
+</index>

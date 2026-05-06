@@ -20,8 +20,51 @@ function get_region_hierarchy(region_index)
     end
     local _, isrgn, _, _, name = reaper.EnumProjectMarkers(region_index)
     if isrgn then
-        local r, p = name:match("^%w+_([^_]+)_([^_]+)_$")
-        if r and p then return { root = r, parent = p } end
+        -- Strip the known prefix (e.g. "sx_", "mx_") then split remaining into segments.
+        -- Region name format: prefix_root_parent_ (root and parent may themselves contain _).
+        -- We find the matching audio type to know the prefix, then extract segments 2..n-2
+        -- as root and segment n-1 as parent (last segment before trailing _).
+        -- Find the matching audio type by prefix
+        local matched_prefix
+        for _, t in ipairs(RC.audio_types or {}) do
+            if name:sub(1, #t.prefix + 1) == t.prefix .. "_" then
+                matched_prefix = t.prefix
+                break
+            end
+        end
+        local body = matched_prefix and name:match("^" .. matched_prefix .. "_(.+)$")
+        if body then
+            body = body:gsub("_$", "")
+            local segs = {}
+            for s in body:gmatch("[^_]+") do segs[#segs + 1] = s end
+
+            -- Count how many wildcards appear after $parent in this type's wildcard template.
+            -- Those correspond to trailing segments (e.g. $bpm, $meter) that are NOT root/parent.
+            local extra = 0
+            for _, t in ipairs(RC.audio_types or {}) do
+                if t.prefix == matched_prefix and t.wildcard then
+                    local after = t.wildcard:match("%$parent(.*)")
+                    if after then
+                        for _ in after:gmatch("%$%a+") do extra = extra + 1 end
+                    end
+                    break
+                end
+            end
+            -- Remove trailing non-root/parent segments, keeping at least 2
+            while extra > 0 and #segs > 2 do
+                table.remove(segs)
+                extra = extra - 1
+            end
+
+            if #segs >= 2 then
+                local parent = segs[#segs]
+                table.remove(segs, #segs)
+                local root = table.concat(segs, "_")
+                return { root = root, parent = parent }
+            elseif #segs == 1 then
+                return { root = segs[1], parent = segs[1] }
+            end
+        end
     end
     return { root = "General", parent = "Parent" }
 end
@@ -78,8 +121,9 @@ local function create_regions_from_folder_structure()
         if min_s == math.huge or max_e == 0 then goto continue end
 
         local region_name = expand_wildcards(atype.wildcard, atype.prefix, root_name, folder_name)
-        local idx = reaper.AddProjectMarker2(0, true, min_s, max_e, region_name, -1, 0)
-        update_region_hierarchy(idx, root_name, folder_name)
+        reaper.AddProjectMarker2(0, true, min_s, max_e, region_name, -1, 0)
+        local region_id = string.format("%.10f_%.10f", min_s, max_e)
+        RC.region_hierarchy_data[region_id] = { root = root_name, parent = folder_name }
 
         table.insert(RC.valid_tracks, {
             name = region_name, start = min_s, end_pos = max_e, variation = 1,
@@ -90,10 +134,59 @@ local function create_regions_from_folder_structure()
     return total
 end
 
+function validate_preconditions()
+    if reaper.GetSelectedTrack(0, 0) == nil then
+        return false,
+            "No track selected.\n\nSelect one or more parent folder tracks before creating regions."
+    end
+
+    if not RC.audio_types or not RC.audio_types[RC.selected_type_idx or 0] then
+        return false,
+            "Audio type configuration is missing or corrupted.\n\n" ..
+            "Go to the Audio Types tab and click Reset to Defaults."
+    end
+
+    local ext_ok = pcall(function()
+        reaper.GetExtState(RC.EXT_KEY, "audio_type_count")
+    end)
+    if not ext_ok then
+        return false,
+            "Cannot read REAPER ExtState (key: " .. tostring(RC.EXT_KEY) .. ").\n\n" ..
+            "Check script permissions or restart REAPER."
+    end
+
+    local lib_path = reaper.GetExtState("Lokasenna_GUI", "lib_path_v2")
+    if not lib_path or lib_path == "" then
+        return false,
+            "Lokasenna_GUI v2 library path is not configured.\n\n" ..
+            "Run: Scripts > ReaTeam Scripts > Development >\n" ..
+            "Lokasenna_GUI v2 > Library > Set Lokasenna_GUI v2 library path.lua"
+    end
+    local f = io.open(lib_path .. "Core.lua", "r")
+    if not f then
+        return false,
+            "Lokasenna_GUI v2 Core.lua not found at:\n" .. lib_path .. "\n\n" ..
+            "Re-run the library path setter script."
+    end
+    f:close()
+
+    local _, proj_path = reaper.EnumProjects(-1, "")
+    if proj_path == "" then
+        local choice = reaper.ShowMessageBox(
+            "This project has never been saved.\n\n" ..
+            "The region root name will default to \"Project\".\n\nContinue anyway?",
+            "RegionForge — Unsaved Project", 4)
+        if choice ~= 6 then return false, "" end
+    end
+
+    return true, ""
+end
+
 function create_regions()
     reaper.PreventUIRefresh(1)
     reaper.Undo_BeginBlock()
 
+    -- existing guard: kept as-is
     if not RC.audio_types[RC.selected_type_idx] then
         reaper.ShowMessageBox("No audio type selected.", "Invalid Selection", 0)
         reaper.PreventUIRefresh(-1)
@@ -101,14 +194,54 @@ function create_regions()
         return
     end
 
-    sync_config_to_audio_type()
-    local n = create_regions_from_folder_structure()
-    if n > 0 then
-        reaper.ShowMessageBox(string.format("Created %d region(s).", n), "Regions Created", 0)
+    -- precondition check
+    local valid, msg = validate_preconditions()
+    if not valid then
+        if msg ~= "" then
+            reaper.ShowMessageBox(msg, "RegionForge — Cannot Proceed", 0)
+        end
+        reaper.PreventUIRefresh(-1)
+        reaper.Undo_EndBlock("Create Regions", -1)
+        return
     end
+
+    -- pcall protects against unexpected runtime errors in track/region logic
+    local ok, err = pcall(function()
+        sync_config_to_audio_type()
+        local n = create_regions_from_folder_structure()
+        if n > 0 then
+            save_region_hierarchy()
+            reaper.ShowMessageBox(string.format("Created %d region(s).", n), "Regions Created", 0)
+        end
+    end)
 
     reaper.PreventUIRefresh(-1)
     reaper.Undo_EndBlock("Create Regions", -1)
+
+    if not ok then
+        reaper.ShowMessageBox(
+            "Unexpected error in RegionForge:\n\n" .. tostring(err),
+            "RegionForge — Error", 0)
+    end
+end
+
+function save_region_hierarchy()
+    local lines = {}
+    for id, h in pairs(RC.region_hierarchy_data) do
+        lines[#lines + 1] = id .. "|" .. (h.root or "") .. "|" .. (h.parent or "")
+    end
+    reaper.SetExtState(RC.EXT_KEY, "region_hierarchy", table.concat(lines, "\n"), true)
+end
+
+function load_region_hierarchy()
+    local data = {}
+    local str = reaper.GetExtState(RC.EXT_KEY, "region_hierarchy")
+    if str == "" then return data end
+    for line in (str .. "\n"):gmatch("([^\n]+)") do
+        local id, root, parent = line:match("^([^|]+)|([^|]*)|(.-)$")
+        if id and id ~= "" then data[id] = { root = root or "", parent = parent or "" } end
+    end
+    return data
 end
 
 function update_selected_region_hierarchy()
@@ -146,3 +279,5 @@ function update_selected_region_hierarchy()
         end
     end
 end
+
+RC.region_hierarchy_data = load_region_hierarchy()
