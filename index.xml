@@ -20,6 +20,24 @@ Features:
         ]]></description>
         <link rel="website">https://github.com/panchuel/Panchu_Scripts</link>
       </metadata>
+      <version name="1.1" author="Panchuel" time="2026-05-06T00:00:00Z">
+        <changelog><![CDATA[
+- Add configurable base render folder (textbox + Browse button in Render tab)
+- Cross-platform folder picker: PowerShell/OpenFileDialog on Windows, osascript on macOS, zenity/kdialog on Linux
+- Non-blocking Browse dialog (REAPER stays responsive while picker loads)
+- Fix Open Folder button to launch Explorer/Finder without blocking
+- Fix base folder field: clearing it now resets to project default immediately
+        ]]></changelog>
+        <source file="RegionForge.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/RegionForge.lua</source>
+        <source file="src/config.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/config.lua</source>
+        <source file="src/audio_types.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/audio_types.lua</source>
+        <source file="src/settings.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/settings.lua</source>
+        <source file="src/track_utils.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/track_utils.lua</source>
+        <source file="src/wildcards.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/wildcards.lua</source>
+        <source file="src/regions.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/regions.lua</source>
+        <source file="src/render.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/render.lua</source>
+        <source file="src/gui.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/src/gui.lua</source>
+      </version>
       <version name="1.0" author="Panchuel" time="2026-05-06T00:00:00Z">
         <changelog><![CDATA[Initial release]]></changelog>
         <source file="RegionForge.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Rendering%20Tool/Region%20Creator/RegionForge.lua</source>
