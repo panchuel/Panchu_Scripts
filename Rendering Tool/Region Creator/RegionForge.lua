@@ -1,4 +1,4 @@
---@description Region Creator
+--@description RegionForge
 --@version 1.0
 --@author Panchu
 --@provides [main] .
@@ -10,7 +10,7 @@ local _PATH = debug.getinfo(1, "S").source:match[[^@?(.*[\/])[^\/]-$]]
 local function load_module(name)
     local fn, err = loadfile(_PATH .. "src/" .. name)
     if not fn then
-        reaper.MB("Error loading " .. name .. ":\n\n" .. tostring(err), "Region Creator", 0)
+        reaper.MB("Error loading " .. name .. ":\n\n" .. tostring(err), "RegionForge", 0)
         return false
     end
     fn()
