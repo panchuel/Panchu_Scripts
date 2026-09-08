@@ -37,6 +37,12 @@ RC.dx_quest_type      = s.dx_quest_type
 RC.dx_quest_name      = s.dx_quest_name
 RC.dx_line_number     = s.dx_line_number
 RC.render_base_dir    = s.render_base_dir
+RC.render_engine      = s.render_engine
+RC.direct_bit_depth   = s.direct_bit_depth
+RC.direct_srate       = s.direct_srate
+RC.ucs_creator_id     = s.ucs_creator_id
+RC.ucs_source_id      = s.ucs_source_id
+RC.ucs_user_data      = s.ucs_user_data
 
 RC.random_params = {
     volume    = { enable = s.volume_enable,    amount = s.volume_amount   },
@@ -94,15 +100,28 @@ local function ensure_rc_complete()
         }
     end
     -- Render fields (also initialized by render.lua, but guarded here as fallback)
-    if RC.render_status   == nil then RC.render_status   = "Ready" end
-    if RC.render_mode     == nil then RC.render_mode     = 1       end
-    if RC.render_base_dir == nil then RC.render_base_dir = ""      end
-    -- Ensure each audio type has path_pattern (may be absent if loaded from v1/v2 ExtState)
+    if RC.render_status    == nil then RC.render_status    = "Ready"  end
+    if RC.render_mode      == nil then RC.render_mode      = 1        end
+    if RC.render_base_dir  == nil then RC.render_base_dir  = ""       end
+    if RC.render_engine    == nil then RC.render_engine    = d.render_engine    end
+    if RC.direct_bit_depth == nil then RC.direct_bit_depth = d.direct_bit_depth end
+    if RC.direct_srate     == nil then RC.direct_srate     = d.direct_srate     end
+    if RC.ucs_creator_id   == nil then RC.ucs_creator_id   = ""       end
+    if RC.ucs_source_id    == nil then RC.ucs_source_id    = ""       end
+    if RC.ucs_user_data    == nil then RC.ucs_user_data    = ""       end
+    -- Ensure each audio type has path_pattern and UCS fields (absent when
+    -- loaded from pre-v4 ExtState)
     for i, t in ipairs(RC.audio_types or {}) do
         if not t.path_pattern or t.path_pattern == "" then
             local def = RC.default_audio_types and RC.default_audio_types[i]
             t.path_pattern = def and def.path_pattern or "{base}/$prefix/$root/$parent/"
         end
+        if t.ucs_enabled == nil then t.ucs_enabled = false end
+        if t.ucs_catid   == nil then t.ucs_catid   = ""    end
+        if not t.ucs_wildcard or t.ucs_wildcard == "" then
+            t.ucs_wildcard = RC.DEFAULT_UCS_WILDCARD
+        end
+        if t.fields == nil then t.fields = {} end
     end
 end
 

@@ -13,6 +13,8 @@ folders. All settings persist between sessions via REAPER ExtState.
 
 Features:
 - Wildcard token naming: $prefix, $root, $parent, $bpm, $meter, $character, $questname, $line
+- UCS 8.2 naming mode per audio type: $catid, $fxname, $creatorid, $sourceid, $userdata
+- Direct render engine: WAV output without opening REAPER's render window
 - Four built-in audio types with independent configs
 - Live hierarchy tree preview on the Main tab
 - Batch render with region checklist, Select All / None / Filter by Type
@@ -20,6 +22,33 @@ Features:
         ]]></description>
         <link rel="website">https://github.com/panchuel/Panchu_Scripts</link>
       </metadata>
+      <version name="1.2" author="Panchuel" time="2026-07-09T00:00:00Z">
+        <changelog><![CDATA[
+- Direct render engine (AudioAccessor → WAV) that never opens REAPER's render window; 16/24-bit PCM or 32-bit float, engine selector in the Render tab (native REAPER render kept as fallback for other formats)
+- Async rendering with in-GUI progress; the UI stays responsive during batch renders
+- UCS 8.2 (Universal Category System) naming mode, toggleable per audio type: new UCS tab with Category/SubCategory pickers (82 categories, 753 CatIDs), CreatorID/SourceID/UserData fields and live filename preview
+- New wildcard tokens: $catid, $fxname, $creatorid, $sourceid, $userdata (usable in names and output paths)
+- Modular audio types: create/delete types from the tool (up to 8), each with its own prefix, pattern and output path
+- Custom per-type fields (up to 5) usable as wildcards, e.g. field "weapontype" becomes $weapontype; values edited on the Main tab
+- Selectable sample rate for the Direct engine (project / 44.1 / 48 / 88.2 / 96 kHz)
+- Fix: audio type dropdown now opens anchored to the box instead of detached at the mouse position
+- Fix: Open Folder and Browse no longer freeze REAPER (async shell)
+- Fix ReaPack source URLs after the repository folder move
+        ]]></changelog>
+        <source file="RegionForge.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/RegionForge.lua</source>
+        <source file="src/config.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/config.lua</source>
+        <source file="src/audio_types.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/audio_types.lua</source>
+        <source file="src/settings.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/settings.lua</source>
+        <source file="src/track_utils.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/track_utils.lua</source>
+        <source file="src/ucs_data.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/ucs_data.lua</source>
+        <source file="src/ucs.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/ucs.lua</source>
+        <source file="src/wildcards.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/wildcards.lua</source>
+        <source file="src/wav_writer.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/wav_writer.lua</source>
+        <source file="src/regions.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/regions.lua</source>
+        <source file="src/render_direct.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/render_direct.lua</source>
+        <source file="src/render.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/render.lua</source>
+        <source file="src/gui.lua">https://raw.githubusercontent.com/panchuel/Panchu_Scripts/master/Region%20Creator/src/gui.lua</source>
+      </version>
       <version name="1.1" author="Panchuel" time="2026-05-06T00:00:00Z">
         <changelog><![CDATA[
 - Add configurable base render folder (textbox + Browse button in Render tab)

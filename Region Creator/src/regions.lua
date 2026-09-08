@@ -120,7 +120,13 @@ local function create_regions_from_folder_structure()
         local min_s, max_e = calculate_folder_time_range(tr)
         if min_s == math.huge or max_e == 0 then goto continue end
 
-        local region_name = expand_wildcards(atype.wildcard, atype.prefix, root_name, folder_name)
+        local pattern     = atype.ucs_enabled and atype.ucs_wildcard or atype.wildcard
+        local region_name = expand_wildcards(pattern, atype.prefix, root_name, folder_name)
+        if atype.ucs_enabled then
+            -- UCS reserves "_" as field separator: collapse gaps left by
+            -- empty optional fields (e.g. no CreatorID) and trim the edges.
+            region_name = region_name:gsub("__+", "_"):gsub("^_+", ""):gsub("_+$", "")
+        end
         reaper.AddProjectMarker2(0, true, min_s, max_e, region_name, -1, 0)
         local region_id = string.format("%.10f_%.10f", min_s, max_e)
         RC.region_hierarchy_data[region_id] = { root = root_name, parent = folder_name }

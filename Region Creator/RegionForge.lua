@@ -1,5 +1,5 @@
 --@description RegionForge — Hierarchical region creation & batch render for REAPER
---@version 1.1
+--@version 1.2
 --@author Panchuel
 --@link https://github.com/panchuel/Panchu_Scripts
 --@provides
@@ -8,8 +8,12 @@
 --  src/audio_types.lua
 --  src/settings.lua
 --  src/track_utils.lua
+--  src/ucs_data.lua
+--  src/ucs.lua
 --  src/wildcards.lua
+--  src/wav_writer.lua
 --  src/regions.lua
+--  src/render_direct.lua
 --  src/render.lua
 --  src/gui.lua
 
@@ -32,8 +36,12 @@ for _, m in ipairs({
     "audio_types.lua",
     "settings.lua",
     "track_utils.lua",
+    "ucs_data.lua",
+    "ucs.lua",
     "wildcards.lua",
+    "wav_writer.lua",
     "regions.lua",
+    "render_direct.lua",
     "render.lua",
     "gui.lua",
 }) do
