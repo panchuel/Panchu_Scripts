@@ -1,4 +1,4 @@
--- ── ucs_data.lua ──────────────────────────────────────────────────────
+-- ucs_data.lua
 -- Universal Category System v8.2 catalog (universalcategorysystem.com).
 -- Pure data, no reaper.* calls: reusable outside REAPER (future plugin port).
 -- Regenerate from the official UCS list if a new version is released:

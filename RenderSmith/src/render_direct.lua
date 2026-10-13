@@ -1,11 +1,11 @@
--- ── render_direct.lua ─────────────────────────────────────────────────
+-- render_direct.lua
 -- Direct render engine: no REAPER render window. Track AudioAccessors do
 -- NOT capture project routing (a master accessor returns silence), so the
 -- mix is built by summing every audible track that has items in the region
 -- range: per-track items + track FX come from the accessor; track volume,
 -- pan, mute, solo and the parent-folder volume chain are applied manually.
 -- Limitation (documented in README): FX on parent buses / master are not
--- applied — use the native REAPER engine when those matter.
+-- applied: use the native REAPER engine when those matter.
 -- Runs as a deferred state machine so the GUI stays responsive.
 
 local DIRECT_NCH      = 2
@@ -33,17 +33,7 @@ local function sanitize_filename(name)
     return (name:gsub('[<>:"/\\|%?%*]', "-"))
 end
 
--- ── Source track collection ──────────────────────────────────────────
-
-local function has_items_in_range(tr, range_start, range_end)
-    for k = 0, reaper.CountTrackMediaItems(tr) - 1 do
-        local item = reaper.GetTrackMediaItem(tr, k)
-        local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-        local len  = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-        if pos < range_end and (pos + len) > range_start then return true end
-    end
-    return false
-end
+-- Source track collection
 
 local function is_effectively_muted(tr)
     while tr do
@@ -63,7 +53,24 @@ local function effective_volume(tr)
     return vol * reaper.GetMediaTrackInfo_Value(reaper.GetMasterTrack(0), "D_VOL")
 end
 
-local function collect_source_tracks(region)
+-- Candidate tracks for one region. With a plan item the candidates are the
+-- region's own source tracks, which is what isolates the render: without
+-- it every track holding items in range would be summed, so folders that
+-- overlap in time would bleed into each other's files.
+local function candidate_tracks(region, plan_item)
+    if plan_item then return plan_audible_sources(plan_item) end
+
+    local list = {}
+    for i = 0, reaper.CountTracks(0) - 1 do
+        local tr = reaper.GetTrack(0, i)
+        if track_has_items_in_range(tr, region.pos, region.rend) then
+            list[#list + 1] = tr
+        end
+    end
+    return list
+end
+
+local function collect_source_tracks(region, plan_item)
     local any_solo = false
     for i = 0, reaper.CountTracks(0) - 1 do
         if reaper.GetMediaTrackInfo_Value(reaper.GetTrack(0, i), "I_SOLO") > 0 then
@@ -73,9 +80,8 @@ local function collect_source_tracks(region)
     end
 
     local sources = {}
-    for i = 0, reaper.CountTracks(0) - 1 do
-        local tr = reaper.GetTrack(0, i)
-        local audible = has_items_in_range(tr, region.pos, region.rend)
+    for _, tr in ipairs(candidate_tracks(region, plan_item)) do
+        local audible = track_has_items_in_range(tr, region.pos, region.rend)
             and not is_effectively_muted(tr)
             and reaper.GetMediaTrackInfo_Value(tr, "B_MAINSEND") == 1
             and (not any_solo or reaper.GetMediaTrackInfo_Value(tr, "I_SOLO") > 0)
@@ -92,7 +98,7 @@ local function collect_source_tracks(region)
     return sources
 end
 
--- ── Job lifecycle ─────────────────────────────────────────────────────
+-- Job lifecycle
 
 local function close_current_target(delete_partial)
     if not job then return end
@@ -127,7 +133,7 @@ local function open_next_target()
         return
     end
 
-    local sources = collect_source_tracks(region)
+    local sources = collect_source_tracks(region, job.plan_by_guid[target.id])
     if #sources == 0 then
         fail_target("no audible tracks with items in region range")
         return
@@ -187,7 +193,7 @@ local function process_current_target()
         or (reaper.time_precise() - t0) > TICK_BUDGET_SEC
 
     local pct = math.floor(job.frames_done / job.total_frames * 100)
-    RC.render_status = string.format("Rendering %d/%d \xe2\x80\x94 %d%%",
+    RC.render_status = string.format("Rendering %d/%d - %d%%",
         job.idx, #job.targets, pct)
 
     if job.frames_done >= job.total_frames then
@@ -201,18 +207,8 @@ local function process_current_target()
 end
 
 local function finish_job()
-    local done, failed = 0, 0
-    for _, r in ipairs(RC.render_results) do
-        if r.ok then done = done + 1 else failed = failed + 1 end
-    end
-    if failed == 0 then
-        RC.render_status = string.format("Done (%d) \xe2\x86\x92 %s",
-            done, RC.last_render_dir or "?")
-    else
-        RC.render_status = string.format("Done %d  Failed %d \xe2\x86\x92 %s",
-            done, failed, RC.last_render_dir or "?")
-    end
     job = nil
+    render_report_finished()
 end
 
 local function tick()
@@ -233,25 +229,34 @@ local function tick()
     reaper.defer(tick)
 end
 
--- ── Public API ────────────────────────────────────────────────────────
+-- Public API
 
 function direct_render_is_active()
     return job ~= nil
 end
 
--- targets: list of { id, out_dir, filename, region = {pos, rend, name} }
-function direct_render_start(targets)
+-- The exact file this target would write. Used by the overwrite check.
+function direct_render_output_path(target)
+    return target.out_dir .. package.config:sub(1, 1)
+        .. sanitize_filename(target.filename) .. ".wav"
+end
+
+-- targets:      list of { id, out_dir, filename, region = {pos, rend, name} }
+-- plan_by_guid: region GUID -> plan item, so each target is summed from
+--               only its own tracks (see plan.lua)
+function direct_render_start(targets, plan_by_guid)
     if job then return end
     RC.render_results = {}
     job = {
-        targets   = targets,
+        targets      = targets,
+        plan_by_guid = plan_by_guid or {},
         idx       = 1,
         srate     = get_output_srate(),
         bit_depth = tonumber(RC.direct_bit_depth) or 24,
         buffer    = reaper.new_array(BLOCK_FRAMES * DIRECT_NCH),
         acc       = {},
     }
-    RC.render_status = string.format("Rendering 1/%d \xe2\x80\x94 0%%", #targets)
+    RC.render_status = string.format("Rendering 1/%d - 0%%", #targets)
     reaper.defer(tick)
 end
 

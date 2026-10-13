@@ -4,7 +4,7 @@
 --   v3 (4 pipes):  name|prefix|wildcard|path_pattern|config
 --   v4 (7 pipes):  name|prefix|wildcard|path_pattern|ucs_enabled|ucs_catid|ucs_wildcard|config
 --   v5 (8 pipes):  name|prefix|wildcard|path_pattern|ucs_enabled|ucs_catid|ucs_wildcard|fields|config  ← current
---   (fields = "key=value;key2=value2" — custom per-type wildcards)
+--   (fields = "key=value;key2=value2", custom per-type wildcards)
 local DEFAULT_PATH = "{base}/$prefix/$root/$parent/"
 
 local function serialize_fields(fields)
@@ -117,7 +117,7 @@ function save_audio_types(types)
     end
 end
 
--- ── Type / custom-field management (called from GUI buttons) ─────────
+-- Type / custom-field management (called from GUI buttons)
 
 function add_audio_type(name, prefix)
     if #RC.audio_types >= RC.MAX_AUDIO_TYPES then

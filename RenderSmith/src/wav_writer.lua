@@ -1,4 +1,4 @@
--- ── wav_writer.lua ────────────────────────────────────────────────────
+-- wav_writer.lua
 -- Pure-Lua WAV file writer. No reaper.* calls: this module must stay
 -- host-agnostic so it can be reused outside REAPER (future plugin port).
 -- Requires Lua 5.3+ (string.pack). Supports 16/24-bit PCM and 32-bit float.

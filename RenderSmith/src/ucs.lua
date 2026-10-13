@@ -1,4 +1,4 @@
--- ── ucs.lua ───────────────────────────────────────────────────────────
+-- ucs.lua
 -- UCS (Universal Category System) helpers: field sanitizing and catalog
 -- lookups over RC.UCS (see ucs_data.lua).
 -- Pure Lua, no reaper.* calls: reusable outside REAPER (future plugin port).

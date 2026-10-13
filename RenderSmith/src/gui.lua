@@ -1,11 +1,11 @@
--- ── Lokasenna library ────────────────────────────────────────────────
+-- Lokasenna library
 local lib_path = reaper.GetExtState("Lokasenna_GUI", "lib_path_v2")
 if not lib_path or lib_path == "" then
     reaper.MB(
         "Couldn't load Lokasenna_GUI v2.\n\n" ..
         "Please run:\nScripts > ReaTeam Scripts > Development >\n" ..
         "Lokasenna_GUI v2 > Library > Set Lokasenna_GUI v2 library path.lua",
-        "RegionForge", 0)
+        RC.PRODUCT_NAME, 0)
     error("missing Lokasenna_GUI v2")
 end
 loadfile(lib_path .. "Core.lua")()
@@ -18,7 +18,7 @@ GUI.req(lib_path .. "Classes/Class - Label.lua")()
 GUI.req(lib_path .. "Classes/Class - Frame.lua")()
 if missing_lib then error("missing Lokasenna class") end
 
--- ── RC_Dropdown: themed dropdown overlay for all Menuboxes ───────────
+-- RC_Dropdown: themed dropdown overlay for all Menuboxes
 -- The stock Menubox opens the native OS context menu (white, unthemed).
 -- This single overlay element lives on z=1 (topmost), draws with the GUI
 -- palette below the owning box, and supports mouse-wheel scrolling for
@@ -167,10 +167,10 @@ function GUI.Menubox:onmouseup()
     self:redraw()
 end
 
--- ── Footer override ──────────────────────────────────────────────────
+-- Footer override
 GUI.version = 0
 GUI.Draw_Version = function()
-    local str = "RegionForge v1.2  \xe2\x80\x94  by Panchuel"
+    local str = RC.PRODUCT_NAME .. " v" .. RC.VERSION .. "  -  by Panchuel"
     GUI.font(4)
     GUI.color("txt")
     local sw, sh = gfx.measurestr(str)
@@ -179,7 +179,7 @@ GUI.Draw_Version = function()
     gfx.drawstr(str)
 end
 
--- ── RC_Checklist: custom checkbox list (no external class needed) ────
+-- RC_Checklist: custom checkbox list (no external class needed)
 GUI.RC_Checklist = {}
 GUI.RC_Checklist.__index = GUI.RC_Checklist
 
@@ -257,8 +257,8 @@ end
 
 function GUI.RC_Checklist:onmouseup() end
 
--- ── Window ───────────────────────────────────────────────────────────
-GUI.name   = "RegionForge v1.2"
+-- Window
+GUI.name   = RC.PRODUCT_NAME .. " v" .. RC.VERSION
 GUI.w, GUI.h = 460, 642
 
 -- Maps between menubox positions and setting values (Render tab)
@@ -269,15 +269,18 @@ local SRATE_INDEX   = { [0] = 1, [44100] = 2, [48000] = 3, [88200] = 4, [96000] 
 GUI.fonts[5] = {"Calibri", 11}
 GUI.anchor, GUI.corner = "screen", "C"
 
--- ── Layout constants ─────────────────────────────────────────────────
+-- Layout constants
 local LM    = 16
 local TW    = GUI.w - LM * 2   -- 428
 local TAB_H = 16
 local HDR_Y = TAB_H + 2        -- header band top  = 18
 local HDR_H = 26               -- header band height
 local CY    = HDR_Y + HDR_H + 4 -- content start   = 48
+local SUB_H  = 18               -- Config sub-tab bar height
+local SUB_Y  = CY               -- it sits where content would start...
+local SUB_CY = CY + SUB_H + 4   -- ...so its panes start lower
 
--- ── Z-layer map ──────────────────────────────────────────────────────
+-- Z-layer map
 --  1 = Tabs bar  (always visible)
 --  2 = Main tab
 --  3 = Audio Config tab
@@ -285,23 +288,100 @@ local CY    = HDR_Y + HDR_H + 4 -- content start   = 48
 --  5 = Music-specific fields   (managed manually, shown on Main tab)
 --  6 = Dialogue-specific fields (managed manually, shown on Main tab)
 --  7 = Render tab
---  8 = Audio-type header       (always visible — not in any tab set)
+--  8 = Audio-type header       (always visible, not in any tab set)
 --  9 = Render checklist + selection buttons
+-- 10 = Custom fields of the selected type (shown on Main tab)
+-- 11 = Advanced pane
+-- 12 = Render tab reflow group
+-- 13 = Config sub-tab bar
+-- 14 = License tab
 
--- ── Tabs ─────────────────────────────────────────────────────────────
-GUI.New("tabs", "Tabs", 1, 0, 0, 90, TAB_H, "Main,Audio Config,UCS,Render", 3)
+-- Tabs
+GUI.New("tabs", "Tabs", 1, 0, 0, 90, TAB_H, "Main,Config,Render,License", 3)
 
--- ── Always-visible audio type header (z=8) ───────────────────────────
+-- Config holds three panes that all configure something. Its sub-bar is a
+-- plain Tabs element with no z-sets of its own: the update function reads
+-- its value and drives GUI.elms_hide directly, the same way the Music and
+-- Dialogue field groups are handled. Letting it manage z-sets would fight
+-- the parent tab bar over the same layers.
+GUI.New("subtabs", "Tabs", 13, 0, SUB_Y, 104, SUB_H, "Audio Types,UCS,Advanced", 3)
+
+-- Forward-declared: the UCS button in the header below closes over this,
+-- and a `local` further down would leave that closure reading a nil global.
+local _ucs_subs
+
+-- Always-visible audio type header (z=8)
 local _type_names = {}
 for _, t in ipairs(RC.audio_types) do _type_names[#_type_names + 1] = t.name end
 
 GUI.New("lbl_atype_hdr", "Label",   8, LM,        HDR_Y + 6,  "Audio Type:", false, 3)
-GUI.New("sel_type",      "Menubox", 8, LM + 96,   HDR_Y,      TW - 96, HDR_H, "",
+GUI.New("sel_type",      "Menubox", 8, LM + 96,   HDR_Y, TW - 96 - 84, HDR_H, "",
     table.concat(_type_names, ","))
+
+-- UCS naming is a property of the selected type, so its switch lives beside
+-- the type picker rather than buried inside the Config tab.
+GUI.New("btn_ucs", "Button", 8, LM + TW - 80, HDR_Y + 1, 80, HDR_H - 2, "", function()
+    local at = RC.audio_types[RC.selected_type_idx]
+    if not at then return end
+    at.ucs_enabled = not at.ucs_enabled
+
+    -- First enable with no CatID picked yet: adopt whatever the UCS pane
+    -- currently shows, so a name is never built from an empty CatID.
+    if at.ucs_enabled and (not at.ucs_catid or at.ucs_catid == "") then
+        local entry = _ucs_subs and _ucs_subs[GUI.Val("mnu_ucs_sub") or 1]
+        if entry then at.ucs_catid = entry.id end
+    end
+
+    refresh_ucs_toggle()
+    refresh_ucs_tab()
+end)
 GUI.New("frm_hdr_sep",   "Frame",   8, 0, CY - 2, GUI.w, 2,  false, true, "elm_frame", 0)
 
+-- Markers go on the folder track by default, where they stay clear of the
+-- audio; a marker already selected is edited in place instead.
+function gui_edit_name_switch()
+    local existing = name_switch_selected()
+
+    if existing then
+        local ok, name = reaper.GetUserInputs("Edit NameSwitch", 1,
+            "Name:,extrawidth=180", name_switch_name(existing))
+        if not ok then return end
+        reaper.Undo_BeginBlock()
+        name_switch_set(existing, name)
+        reaper.Undo_EndBlock("Edit NameSwitch", -1)
+        reaper.UpdateArrange()
+        refresh_create_button()
+        return
+    end
+
+    local track = reaper.GetSelectedTrack(0, 0)
+    if not track then
+        reaper.MB("Select the folder track to put the marker on, or select an " ..
+            "existing marker to rename it.", "NameSwitch", 0)
+        return
+    end
+
+    local ok, name = reaper.GetUserInputs("New NameSwitch", 1,
+        "Name:,extrawidth=180", "")
+    if not ok or name == "" then return end
+
+    reaper.Undo_BeginBlock()
+    name_switch_create(track, reaper.GetCursorPosition(), name)
+    reaper.Undo_EndBlock("Add NameSwitch", -1)
+    reaper.UpdateArrange()
+    refresh_create_button()
+end
+
+function refresh_ucs_toggle()
+    local btn = GUI.elms.btn_ucs
+    if not btn then return end
+    local at = RC.audio_types[RC.selected_type_idx]
+    btn.caption = (at and at.ucs_enabled) and "UCS: On" or "UCS: Off"
+    if GUI.redraw_z then GUI.redraw_z[8] = true end
+end
+
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- TAB 1 — MAIN  (z=2)
+-- TAB 1: MAIN  (z=2)
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 local y = CY  -- 48
 
@@ -312,26 +392,32 @@ for _i = 0, 5 do
 end
 y = y + 116  -- 164
 
-GUI.New("btn_create", "Button", 2, LM, y, TW, 48, "Create Regions",
+GUI.New("btn_create", "Button", 2, LM, y, TW, 40, "Create Regions",
     function() reaper.defer(create_regions) end)
-y = y + 60  -- 224
+y = y + 48
 
-GUI.New("btn_hierarchy", "Button", 2, LM, y, TW, 34, "Update Hierarchy",
+GUI.New("btn_hierarchy", "Button", 2, LM, y, TW, 26, "Update Hierarchy",
     function() reaper.defer(update_selected_region_hierarchy) end)
-y = y + 44  -- 268
+y = y + 34
+
+-- One button for both jobs: with a marker selected it renames that one,
+-- otherwise it drops a new marker at the edit cursor.
+GUI.New("btn_nameswitch", "Button", 2, LM, y, TW, 26, "Add / Edit NameSwitch",
+    function() reaper.defer(gui_edit_name_switch) end)
+y = y + 34
 
 -- Type-specific settings appear below (z=5 Music, z=6 Dialogue)
 local MS_Y = y + 12  -- 280
 
--- ── Music settings (z=5) ─────────────────────────────────────────────
-GUI.New("lbl_music_hdr", "Label",   5, LM,        MS_Y,       "\xe2\x94\x80\xe2\x94\x80 Music settings \xe2\x94\x80\xe2\x94\x80", false, 3)
+-- Music settings (z=5)
+GUI.New("lbl_music_hdr", "Label",   5, LM,        MS_Y,       "Music settings", false, 3)
 GUI.New("lbl_bpm",       "Label",   5, LM,        MS_Y + 28,  "BPM:",   false, 3)
 GUI.New("txt_bpm",       "Textbox", 5, LM + 52,   MS_Y + 24,  90, 24,  "", 4)
 GUI.New("lbl_meter",     "Label",   5, LM + 156,  MS_Y + 28,  "Meter:", false, 3)
 GUI.New("txt_meter",     "Textbox", 5, LM + 212,  MS_Y + 24,  90, 24,  "", 4)
 
--- ── Dialogue settings (z=6) ──────────────────────────────────────────
-GUI.New("lbl_dx_hdr",  "Label",   6, LM,       MS_Y,       "\xe2\x94\x80\xe2\x94\x80 Dialogue settings \xe2\x94\x80\xe2\x94\x80", false, 3)
+-- Dialogue settings (z=6)
+GUI.New("lbl_dx_hdr",  "Label",   6, LM,       MS_Y,       "Dialogue settings", false, 3)
 GUI.New("lbl_char",    "Label",   6, LM,       MS_Y + 28,  "Character:",  false, 3)
 GUI.New("txt_char",    "Textbox", 6, LM + 98,  MS_Y + 24,  TW - 98, 24, "", 4)
 GUI.New("lbl_qtype",   "Label",   6, LM,       MS_Y + 58,  "Quest Type:", false, 3)
@@ -341,12 +427,12 @@ GUI.New("txt_qname",   "Textbox", 6, LM + 98,  MS_Y + 84,  TW - 98, 24, "", 4)
 GUI.New("lbl_line",    "Label",   6, LM,       MS_Y + 118, "Line:",        false, 3)
 GUI.New("txt_line",    "Textbox", 6, LM + 98,  MS_Y + 114,  60,     24,  "", 4)
 
--- ── Custom fields of the selected type (z=10, shown on Main tab) ──────
+-- Custom fields of the selected type (z=10, shown on Main tab)
 -- Rows are pre-created and moved offscreen when the type has fewer fields.
 local CF_Y   = MS_Y + 150   -- below the music/dialogue panels
 local CF_OFF = -10000
 GUI.New("lbl_cf_hdr", "Label", 10, LM, CF_Y,
-    "\xe2\x94\x80\xe2\x94\x80 Custom fields \xe2\x94\x80\xe2\x94\x80", false, 3)
+    "Custom fields", false, 3)
 for _i = 1, RC.MAX_CUSTOM_FIELDS do
     GUI.New("lbl_cf" .. _i, "Label",   10, LM,       CF_Y + 20 + (_i - 1) * 28 + 4, "", false, 3)
     GUI.New("txt_cf" .. _i, "Textbox", 10, LM + 110, CF_Y + 20 + (_i - 1) * 28, TW - 110, 24, "", 4)
@@ -357,9 +443,9 @@ end
 local refresh_type_selector, refresh_field_list, refresh_custom_fields
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- TAB 2 — AUDIO CONFIG  (z=3)
+-- TAB 2: AUDIO CONFIG  (z=3)
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-y = CY  -- 48
+y = SUB_CY
 
 -- All controls on this tab edit the type selected in the header above.
 GUI.New("lbl_type_name", "Label",   3, LM,        y + 5, "Name:", false, 3)
@@ -532,10 +618,10 @@ GUI.New("btn_reset_types", "Button", 3, LM + BW + 8, y, BW, 28, "Reset to Defaul
 end)
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- TAB 3 — UCS  (z=4)
+-- TAB 3: UCS  (z=4)
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 local UCS_CATS = ucs_categories()
-local _ucs_subs = ucs_subcats_for(UCS_CATS[1])
+_ucs_subs = ucs_subcats_for(UCS_CATS[1])
 
 local function ucs_sub_names(subs)
     local names = {}
@@ -543,16 +629,11 @@ local function ucs_sub_names(subs)
     return names
 end
 
-y = CY  -- 48
+y = SUB_CY
 
 GUI.New("lbl_ucs_hdr", "Label", 4, LM, y,
     "UCS naming  (Universal Category System v" .. RC.UCS_VERSION .. ")", false, 3)
 y = y + 24
-
-GUI.New("chk_ucs_enable", "Checklist", 4, LM, y, TW, 28, "",
-    "Use UCS naming for this audio type", "v", 4)
-GUI.elms.chk_ucs_enable.frame = false
-y = y + 36
 
 GUI.New("lbl_ucs_cat", "Label",   4, LM,       y + 5, "Category:", false, 3)
 GUI.New("mnu_ucs_cat", "Menubox", 4, LM + 100, y, TW - 100, 24, "", UCS_CATS)
@@ -562,7 +643,7 @@ GUI.New("lbl_ucs_sub", "Label",   4, LM,       y + 5, "SubCategory:", false, 3)
 GUI.New("mnu_ucs_sub", "Menubox", 4, LM + 100, y, TW - 100, 24, "", ucs_sub_names(_ucs_subs))
 y = y + 30
 
-GUI.New("lbl_ucs_catid", "Label", 4, LM, y, "CatID:  \xe2\x80\x94", false, 3)
+GUI.New("lbl_ucs_catid", "Label", 4, LM, y, "CatID:  -", false, 3)
 y = y + 26
 
 GUI.New("lbl_ucs_pat",     "Label",   4, LM,       y + 5, "Pattern:", false, 3)
@@ -592,7 +673,7 @@ y = y + 12
 
 GUI.New("lbl_ucs_prev_hdr", "Label", 4, LM, y, "Filename preview:", false, 3)
 y = y + 20
-GUI.New("lbl_ucs_preview", "Label", 4, LM + 6, y, "\xe2\x80\x94", false, 4)
+GUI.New("lbl_ucs_preview", "Label", 4, LM + 6, y, "-", false, 4)
 y = y + 26
 GUI.New("lbl_ucs_tokens", "Label", 4, LM, y,
     "Tokens: $catid  $fxname  $creatorid  $sourceid  $userdata  (+ all standard tokens)", false, 5)
@@ -601,7 +682,7 @@ local _prev_ucs_cat_idx = 0
 local _prev_ucs_sub_idx = 0
 local _prev_ucs_preview_key = nil
 
-local function refresh_ucs_tab()
+function refresh_ucs_tab()
     local at = RC.audio_types[RC.selected_type_idx]
     if not at then return end
 
@@ -624,7 +705,6 @@ local function refresh_ucs_tab()
     end
     GUI.elms.mnu_ucs_sub.retval = sub_idx
 
-    GUI.Val("chk_ucs_enable", at.ucs_enabled and true or false)
     GUI.Val("txt_ucs_pattern", at.ucs_wildcard or RC.DEFAULT_UCS_WILDCARD)
     GUI.Val("lbl_ucs_catid", "CatID:  " ..
         ((at.ucs_catid and at.ucs_catid ~= "") and at.ucs_catid or _ucs_subs[sub_idx].id))
@@ -657,7 +737,7 @@ local function update_ucs_preview()
     GUI.Val("lbl_ucs_preview", name .. ".wav")
 end
 
--- ── Dynamic type / custom-field helpers ──────────────────────────────
+-- Dynamic type / custom-field helpers
 
 -- Rebuilds the header type selector from RC.audio_types (after add/remove/rename)
 refresh_type_selector = function()
@@ -678,7 +758,7 @@ refresh_field_list = function()
         if fields[i] then
             text = "$" .. fields[i].key .. "   =   " .. (fields[i].value or "")
         elseif i == 1 then
-            text = "(none \xe2\x80\x94 use + Field)"
+            text = "(none, use + Field)"
         end
         GUI.Val("lbl_cfld" .. i, text)
     end
@@ -705,22 +785,24 @@ refresh_custom_fields = function()
     if GUI.redraw_z then GUI.redraw_z[10] = true end
 end
 
--- ── Region list builder ──────────────────────────────────────────────
+-- Region list builder
 local function populate_region_checklist()
+    -- Re-read metadata each time: the user may have switched project tab
+    -- since the script started, and it lives in ProjExtState.
+    region_meta_load()
+
     RC.region_list = {}
-    for i = 0, reaper.CountProjectMarkers(0) - 1 do
-        local _, isrgn, pos, rend, name = reaper.EnumProjectMarkers(i)
-        if isrgn then
-            local id    = string.format("%.10f_%.10f", pos, rend)
-            local badge = ""
-            for _, t in ipairs(RC.audio_types) do
-                if region_matches_type(name, t) then
-                    badge = "[" .. t.prefix .. "] "
-                    break
-                end
+    for _, region in ipairs(region_list()) do
+        local badge = ""
+        for _, t in ipairs(RC.audio_types) do
+            if region_matches_type(region.name, t) then
+                badge = "[" .. t.prefix .. "] "
+                break
             end
-            RC.region_list[#RC.region_list + 1] = { id = id, raw_name = name, display = badge .. name }
         end
+        RC.region_list[#RC.region_list + 1] = {
+            id = region.guid, raw_name = region.name, display = badge .. region.name,
+        }
     end
     local chk = GUI.elms.chk_regions
     if not chk then return end
@@ -740,7 +822,7 @@ local function populate_region_checklist()
 end
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- TAB 4 — RENDER  (z=7 + z=9)
+-- TAB 4: RENDER  (z=7 + z=9)
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 y = CY  -- 48
 
@@ -774,7 +856,7 @@ GUI.New("btn_browse_base","Button",  7, LM + TW - 70,   y,     70, 24, "Browse..
     local script_file  -- holds the temp script path for cleanup in poll
 
     if sep == "\\" then
-        -- ── Windows: PowerShell + OpenFileDialog (modern Explorer dialog) ──
+        -- Windows: PowerShell + OpenFileDialog (modern Explorer dialog)
         script_file = tmp .. "\\rf_browse.ps1"
         local f = io.open(script_file, "w")
         if not f then return end
@@ -794,7 +876,7 @@ GUI.New("btn_browse_base","Button",  7, LM + TW - 70,   y,     70, 24, "Browse..
             'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%s"',
             script_file), -1)
     else
-        -- ── Mac / Linux: shell script writes result then exits ─────────
+        -- Mac / Linux: shell script writes result then exits
         script_file = tmp .. "/rf_browse.sh"
         local f = io.open(script_file, "w")
         if not f then return end
@@ -847,7 +929,7 @@ y = y + 34
 
 GUI.New("lbl_engine", "Label",   7, LM,      y + 5, "Engine:", false, 3)
 GUI.New("mnu_engine", "Menubox", 7, LM + 60, y, TW - 60, 24, "",
-    "Direct (WAV \xe2\x80\x94 no window),REAPER render (native)")
+    "Direct (WAV, no window),REAPER render (native)")
 y = y + 30
 
 GUI.New("lbl_depth", "Label",   7, LM,        y + 5, "Depth:", false, 3)
@@ -862,8 +944,8 @@ GUI.New("frm_sep_r", "Frame", 7, LM, y, TW, 2, false, true, "elm_frame", 0)
 y = y + 12
 
 local _BH = math.floor((TW - 8) / 3)
-GUI.New("lbl_rgn_hdr", "Label",  7, LM,            y + 5, "Regions:", false, 3)
-GUI.New("btn_refresh",  "Button", 7, LM + TW - 70, y,     70, 22, "Refresh", function()
+GUI.New("lbl_rgn_hdr", "Label",  9, LM,            y + 5, "Regions:", false, 3)
+GUI.New("btn_refresh",  "Button", 9, LM + TW - 70, y,     70, 22, "Refresh", function()
     populate_region_checklist()
 end)
 y = y + 30
@@ -897,7 +979,8 @@ y = y + 30
 GUI.New("frm_sep_r2", "Frame", 7, LM, y, TW, 2, false, true, "elm_frame", 0)
 y = y + 10
 
-GUI.New("btn_render", "Button", 7, LM, y, TW, 40, "Render Selected", function()
+local _RW = math.floor(TW / 2) - 4
+GUI.New("btn_render", "Button", 12, LM, y, _RW, 40, "Render Checked", function()
     local ids = {}
     local chk = GUI.elms.chk_regions
     if chk and RC.region_list then
@@ -908,11 +991,21 @@ GUI.New("btn_render", "Button", 7, LM, y, TW, 40, "Render Selected", function()
     RC.render_status = "Rendering..."
     render_queue(ids)
 end)
+
+-- Builds regions from the current selection (folders, or just the items
+-- picked) and renders them straight away. With "Regions: Temporary" those
+-- regions are deleted once the render finishes.
+GUI.New("btn_render_folders", "Button", 7, LM + _RW + 8, y, _RW, 40,
+    "Build & Render", function()
+        RC.render_status = "Rendering..."
+        render_from_folders()
+        populate_region_checklist()
+    end)
 y = y + 48
 
--- Opens a folder in the OS file browser without blocking REAPER's UI
+-- Hands a path or a URL to the OS without blocking REAPER's UI
 -- (os.execute freezes REAPER until the shell returns).
-local function open_in_file_browser(path)
+local function open_external(path)
     if reaper.CF_ShellExecute then          -- SWS: clean and async
         reaper.CF_ShellExecute(path)
         return
@@ -927,10 +1020,21 @@ local function open_in_file_browser(path)
     end
 end
 
-GUI.New("btn_open_folder", "Button", 7, LM, y, math.floor(TW / 2) - 4, 22, "Open Folder", function()
+local _FW = math.floor((TW - 16) / 3)
+GUI.New("btn_keep_regions", "Button", 7, LM + _FW + 8, y, _FW, 22, "", function()
+    RC.render_keep_regions = not RC.render_keep_regions
+    refresh_cluster_labels()
+end)
+GUI.New("btn_overwrite", "Button", 7, LM + (_FW + 8) * 2, y, TW - (_FW + 8) * 2, 22,
+    "", function()
+        RC.warn_overwrite = not RC.warn_overwrite
+        refresh_cluster_labels()
+    end)
+
+GUI.New("btn_open_folder", "Button", 7, LM, y, _FW, 22, "Open Folder", function()
     local d = RC.last_render_dir
     if d and d ~= "" then
-        open_in_file_browser(d)
+        open_external(d)
     else
         reaper.MB("Render a region first.", "Open Folder", 0)
     end
@@ -939,14 +1043,286 @@ y = y + 30
 
 GUI.New("lbl_render_status", "Label", 7, LM, y, "Ready", false, 5)
 
+-- Controls that cannot do anything are hidden: the regions section when
+-- the project has no regions, and "Render Checked" when nothing is ticked.
+--
+-- Lokasenna lays out in absolute coordinates, so hiding the regions block
+-- means moving everything below it back up by the height it occupied.
+-- Only x/y are ever changed: a Button bakes its width into its buffer at
+-- init, so resizing one would need a re-init, while moving one does not.
+local REGIONS_BLOCK_H = 182
+local REFLOW_ELMS = {
+    "frm_sep_r2", "btn_render", "btn_render_folders",
+    "btn_open_folder", "btn_keep_regions", "btn_overwrite", "lbl_render_status",
+}
+local reflow_base_y  = nil
+local render_layout  = nil
+
+function layout_render_tab(has_regions, has_checked)
+    local key = tostring(has_regions) .. tostring(has_checked)
+    if key == render_layout then return end
+    render_layout = key
+
+    if not reflow_base_y then
+        reflow_base_y = {}
+        for _, name in ipairs(REFLOW_ELMS) do
+            local e = GUI.elms[name]
+            if e then reflow_base_y[name] = e.y end
+        end
+    end
+
+    local shift = has_regions and 0 or REGIONS_BLOCK_H
+    for _, name in ipairs(REFLOW_ELMS) do
+        local e = GUI.elms[name]
+        if e and reflow_base_y[name] then e.y = reflow_base_y[name] - shift end
+    end
+
+    -- Without the regions block there is already a separator right above,
+    -- so the second one would read as a mistake: park it off-screen.
+    local sep = GUI.elms.frm_sep_r2
+    if sep then sep.x = has_regions and LM or -2000 end
+
+    -- With no "Render Checked" beside it, the remaining button slides into
+    -- the free slot rather than leaving a hole.
+    local folders = GUI.elms.btn_render_folders
+    if folders then folders.x = has_checked and (LM + _RW + 8) or LM end
+
+    if GUI.redraw_z then
+        GUI.redraw_z[7], GUI.redraw_z[9], GUI.redraw_z[12] = true, true, true
+    end
+end
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TAB 5: ADVANCED  (z=11)
+-- Gap clustering and the shared $RF[NAME] wildcard dictionary.
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local WC_ROWS = 9
+local _wc_scope = "global"
+
+y = SUB_CY
+
+GUI.New("lbl_clu_hdr", "Label", 11, LM, y,
+    "Clustering", false, 3)
+y = y + 22
+
+local _CW = math.floor(TW / 2) - 4
+local _C3 = math.floor((TW - 16) / 3)
+GUI.New("btn_cluster",  "Button", 11, LM,                y, _C3, 24, "", function()
+    RC.cluster_enabled = not RC.cluster_enabled
+    refresh_cluster_labels()
+    refresh_create_button()
+end)
+GUI.New("btn_num_single", "Button", 11, LM + _C3 + 8,    y, _C3, 24, "", function()
+    RC.number_single_files = not RC.number_single_files
+    refresh_cluster_labels()
+    refresh_create_button()
+end)
+-- Whether an item selection narrows the job, or folders always win.
+GUI.New("btn_mode", "Button", 11, LM + (_C3 + 8) * 2, y, TW - (_C3 + 8) * 2, 24,
+    "", function()
+        RC.always_track_mode = not RC.always_track_mode
+        refresh_cluster_labels()
+        refresh_create_button()
+    end)
+y = y + 32
+
+GUI.New("lbl_gap",    "Label",   11, LM,            y + 4, "Gap:", false, 3)
+GUI.New("txt_gap",    "Textbox", 11, LM + 44,       y,     90, 24, "", 4)
+GUI.New("btn_gap_unit", "Button", 11, LM + 144,     y,     TW - 144, 24, "", function()
+    RC.gap_use_beat = not RC.gap_use_beat
+    refresh_cluster_labels()
+end)
+y = y + 32
+
+GUI.New("btn_preview", "Button", 11, LM, y, _CW, 24, "Preview clusters", function()
+    local regions, folders = preview_build()
+    if regions == 0 then
+        RC.preview_status = "Preview: nothing to show (select folder tracks)"
+    else
+        local _, _, mode = preview_count()
+        RC.preview_status = string.format(
+            "Preview: %d region(s) from %d folder(s)  -  %s selection",
+            regions, folders, mode == "items" and "item" or "track")
+    end
+    refresh_cluster_labels()
+end)
+GUI.New("btn_preview_clear", "Button", 11, LM + _CW + 8, y, _CW, 24,
+    "Clear preview", function()
+        preview_clear()
+        RC.preview_status = "Preview cleared"
+        refresh_cluster_labels()
+    end)
+y = y + 30
+
+GUI.New("lbl_preview_status", "Label", 11, LM, y, "", false, 5)
+y = y + 20
+
+GUI.New("lbl_clu_hint", "Label", 11, LM, y,
+    "Off = one region per folder. On = one region per sound.", false, 5)
+y = y + 20
+GUI.New("lbl_clu_hint2", "Label", 11, LM, y,
+    "Mode Auto: selected items win over selected folders.", false, 5)
+y = y + 24
+
+GUI.New("frm_sep_a", "Frame", 11, LM, y, TW, 2, false, true, "elm_frame", 0)
+y = y + 12
+
+GUI.New("lbl_wc_hdr", "Label", 11, LM, y,
+    "User wildcards", false, 3)
+y = y + 22
+
+for _i = 0, WC_ROWS - 1 do
+    GUI.New("lbl_rfw" .. _i, "Label", 11, LM + 6, y + _i * 16, "", false, 5)
+end
+y = y + WC_ROWS * 16 + 8
+
+GUI.New("lbl_wc_name",  "Label",   11, LM,       y + 4, "Name:",  false, 3)
+GUI.New("txt_wc_name",  "Textbox", 11, LM + 56,  y,     120, 24, "", 4)
+GUI.New("lbl_wc_value", "Label",   11, LM + 188, y + 4, "Value:", false, 3)
+GUI.New("txt_wc_value", "Textbox", 11, LM + 244, y,     TW - 244, 24, "", 4)
+y = y + 32
+
+local _AW = math.floor((TW - 16) / 3)
+GUI.New("btn_wc_scope", "Button", 11, LM, y, _AW, 24, "", function()
+    _wc_scope = (_wc_scope == "global") and "project" or "global"
+    refresh_cluster_labels()
+end)
+GUI.New("btn_wc_add", "Button", 11, LM + _AW + 8, y, _AW, 24, "Add / Update", function()
+    local name  = GUI.Val("txt_wc_name")  or ""
+    local value = GUI.Val("txt_wc_value") or ""
+    local ok, err = wildcard_dict_set(name, value, _wc_scope)
+    if not ok then
+        reaper.MB(err, "Wildcard", 0)
+        return
+    end
+    GUI.Val("txt_wc_name", "")
+    GUI.Val("txt_wc_value", "")
+    refresh_wildcard_list()
+end)
+GUI.New("btn_wc_del", "Button", 11, LM + (_AW + 8) * 2, y, TW - (_AW + 8) * 2, 24,
+    "Remove", function()
+        local ok, err = wildcard_dict_remove(GUI.Val("txt_wc_name") or "", _wc_scope)
+        if not ok then
+            reaper.MB(err, "Wildcard", 0)
+            return
+        end
+        GUI.Val("txt_wc_name", "")
+        refresh_wildcard_list()
+    end)
+y = y + 30
+
+GUI.New("lbl_wc_hint", "Label", 11, LM, y,
+    "Use as $RF[NAME] in patterns, or RF[NAME] in paths.", false, 5)
+y = y + 18
+GUI.New("lbl_wc_hint2", "Label", 11, LM, y,
+    "Values may contain other wildcards. Project entries beat global ones.", false, 5)
+
+y = y + 24
+GUI.New("frm_sep_a2", "Frame", 11, LM, y, TW, 2, false, true, "elm_frame", 0)
+y = y + 12
+
+GUI.New("lbl_ovr_hdr", "Label", 11, LM, y,
+    "Selected folder track", false, 3)
+y = y + 22
+
+GUI.New("lbl_ovr_sum", "Label", 11, LM + 6, y, "", false, 5)
+y = y + 22
+
+local _OW = math.floor((TW - 16) / 3)
+GUI.New("btn_ovr_type", "Button", 11, LM, y, _OW, 24, "Pin type", function()
+    local tr = reaper.GetSelectedTrack(0, 0)
+    if not tr then return end
+    local at = RC.audio_types[RC.selected_type_idx]
+    if at then setting_set_track(tr, "audio_type", at.prefix) end
+    refresh_track_overrides()
+end)
+GUI.New("btn_ovr_excl", "Button", 11, LM + _OW + 8, y, _OW, 24, "Exclude", function()
+    local tr = reaper.GetSelectedTrack(0, 0)
+    if not tr then return end
+    setting_set_track(tr, "excluded", not is_track_excluded(tr))
+    refresh_track_overrides()
+end)
+GUI.New("btn_ovr_clear", "Button", 11, LM + (_OW + 8) * 2, y, TW - (_OW + 8) * 2, 24,
+    "Clear", function()
+        local tr = reaper.GetSelectedTrack(0, 0)
+        if not tr then return end
+        for _, entry in ipairs(RC.SETTING_REGISTRY) do
+            setting_clear_track(tr, entry.name)
+        end
+        refresh_track_overrides()
+    end)
+y = y + 28
+
+GUI.New("lbl_ovr_hint", "Label", 11, LM, y,
+    "Pinned settings live in the track and travel inside the project.", false, 5)
+
+-- Overrides are stored on the track itself, so the summary has to be
+-- re-read whenever the selection changes, not just when the tab opens.
+function refresh_track_overrides()
+    local tr = reaper.GetSelectedTrack(0, 0)
+    GUI.Val("lbl_ovr_sum", track_override_summary(tr))
+
+    local btn = GUI.elms.btn_ovr_excl
+    if btn then
+        btn.caption = (tr and is_track_excluded(tr)) and "Include" or "Exclude"
+    end
+    if GUI.redraw_z then GUI.redraw_z[11] = true end
+end
+
+-- Buttons carry their state in the caption, so refresh them together.
+function refresh_cluster_labels()
+    local function cap(name, text)
+        local btn = GUI.elms[name]
+        if not btn then return end
+        btn.caption = text
+        if GUI.redraw_z then GUI.redraw_z[btn.z] = true end
+    end
+    cap("btn_cluster",    RC.cluster_enabled and "Clustering: On" or "Clustering: Off")
+    cap("btn_num_single", RC.number_single_files and "Number singles: On"
+                                                 or "Number singles: Off")
+    cap("btn_gap_unit",   RC.gap_use_beat and "Unit: 1 beat (tempo)" or "Unit: seconds")
+    cap("btn_wc_scope",   (_wc_scope == "project") and "Scope: Project" or "Scope: Global")
+    cap("btn_overwrite",  RC.warn_overwrite and "Overwrite: Warn" or "Overwrite: Silent")
+    cap("btn_mode",       RC.always_track_mode and "Mode: Folders" or "Mode: Auto")
+    GUI.Val("lbl_preview_status", RC.preview_status or "")
+    cap("btn_keep_regions", RC.render_keep_regions and "Regions: Keep"
+                                                    or "Regions: Temporary")
+end
+
+function refresh_wildcard_list()
+    local entries = wildcard_dict_entries()
+    for i = 0, WC_ROWS - 1 do
+        local e = entries[i + 1]
+        if e then
+            local value = e.value
+            if #value > 34 then value = value:sub(1, 31) .. "..." end
+            GUI.Val("lbl_rfw" .. i, string.format("$RF[%s] = %s   (%s)",
+                e.name, value, e.scope))
+        elseif i == 0 then
+            GUI.Val("lbl_rfw" .. i, "(no user wildcards yet)")
+        else
+            GUI.Val("lbl_rfw" .. i, "")
+        end
+    end
+    if #entries > WC_ROWS then
+        GUI.Val("lbl_rfw" .. (WC_ROWS - 1),
+            string.format("... and %d more", #entries - WC_ROWS + 1))
+    end
+    if GUI.redraw_z then GUI.redraw_z[11] = true end
+end
+
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- UPDATE FUNCTION  (runs every frame)
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 local _prev_type_idx      = 0
-local _prev_tab           = 0
+local _prev_view           = 0
 local _prev_state_count   = -1
 local _prev_sel_track     = nil
 local _prev_render_status = ""
+local _prev_lic_status    = ""
+local _prev_ovr_track     = false
+local _prev_item_count    = -1
+local _prev_item_first    = nil
 
 local function refresh_tree_view()
     local L = "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 "
@@ -1000,17 +1376,177 @@ local function refresh_tree_view()
     if total > max_show then
         GUI.Val("lbl_tr5", "           ... " .. (total - max_show) .. " more")
     end
+
+    refresh_create_button()
+end
+
+-- The button caption carries how many regions the current selection would
+-- produce. With clustering on that number is the only way to tell whether
+-- the Gap is set sensibly without creating anything first.
+function refresh_create_button()
+    local btn = GUI.elms.btn_create
+    if not btn then return end
+
+    local regions = preview_count()
+    btn.caption = (regions > 0)
+        and string.format("Create Regions  (%d)", regions)
+        or "Create Regions"
+    if GUI.redraw_z then GUI.redraw_z[btn.z] = true end
+end
+
+-- TAB 4: LICENSE  (z=14)
+--
+-- The window always opens, even once the trial is over. The gate at the top
+-- of GUI.func pins it to this tab instead of refusing to start, because
+-- somebody holding a key needs somewhere to type it.
+
+local LIC_Y = CY + 10
+
+GUI.New("lbl_lic_state", "Label", 14, LM, LIC_Y,      "", false, 2)
+GUI.New("lbl_lic_sub",   "Label", 14, LM, LIC_Y + 28, "", false, 4)
+GUI.New("frm_lic_sep",   "Frame", 14, LM, LIC_Y + 54, TW, 2, false, true, "elm_frame", 0)
+
+local LIC_KY = LIC_Y + 68
+GUI.New("lbl_lic_key", "Label",   14, LM,      LIC_KY + 5, "License key:", false, 3)
+GUI.New("txt_license", "Textbox", 14, LM + 86, LIC_KY, TW - 86, 24, "", 4)
+
+local LIC_BY = LIC_KY + 34
+local _LBW   = math.floor((TW - 8) / 2)
+
+GUI.New("btn_lic_activate", "Button", 14, LM, LIC_BY, _LBW, 26, "Activate", function()
+    local key = GUI.Val("txt_license") or ""
+    GUI.Val("lbl_lic_sub", "Checking with the license server...")
+    if GUI.redraw_z then GUI.redraw_z[14] = true end
+
+    license_activate(key, function(ok, info)
+        refresh_license()
+        if ok then
+            GUI.Val("txt_license", "")
+            reaper.MB("License activated. Thank you for buying " ..
+                RC.PRODUCT_NAME .. ".", RC.PRODUCT_NAME, 0)
+        else
+            reaper.MB(tostring(info), RC.PRODUCT_NAME .. " - Activation failed", 0)
+        end
+    end)
+end)
+
+GUI.New("btn_lic_buy", "Button", 14, LM + _LBW + 8, LIC_BY, _LBW, 26,
+    "Buy a license", function()
+    if not RC.BUY_URL or RC.BUY_URL == "" then
+        reaper.MB("This build has no purchase link configured.",
+            RC.PRODUCT_NAME, 0)
+        return
+    end
+    open_external(RC.BUY_URL)
+end)
+
+GUI.New("btn_lic_remove", "Button", 14, LM, LIC_BY + 34, TW, 22,
+    "Remove the license from this computer", function()
+    local choice = reaper.ShowMessageBox(
+        "Remove the license from this computer?\n\n" ..
+        "You can enter the key again here or on another machine. This does " ..
+        "not free the activation on the store side.",
+        RC.PRODUCT_NAME, 4)
+    if choice ~= 6 then return end
+    license_deactivate()
+    refresh_license()
+end)
+
+local LIC_HY = LIC_BY + 76
+local _lic_help = {
+    "The trial unlocks everything for " .. RC.TRIAL_DAYS .. " days.",
+    "",
+    "Your key is emailed when you buy, next to the download link. Paste it",
+    "above and press Activate. It needs the internet only that once: after",
+    "that it re-checks roughly every " .. RC.REVALIDATE_DAYS ..
+        " days and keeps working offline in",
+    "between, so a studio with no connection is never locked out.",
+    "",
+    "One license covers the machines you work on yourself.",
+}
+for i, line in ipairs(_lic_help) do
+    GUI.New("lbl_lic_h" .. i, "Label", 14, LM, LIC_HY + (i - 1) * 15, line, false, 5)
+end
+
+-- Shows a key as its first and last four characters, so the status line can
+-- confirm which key is active without putting the whole thing on screen.
+local function mask_key(key)
+    if not key or #key < 10 then return key or "" end
+    return key:sub(1, 4) .. "..." .. key:sub(-4)
+end
+
+function refresh_license()
+    local st = license_state(true)
+    local head, sub
+
+    if st.status == "licensed" then
+        head = "Licensed"
+        sub  = "Key " .. mask_key(st.key) .. " is active on this computer."
+    elseif st.status == "trial" then
+        head = string.format("Trial: %d day%s left",
+            st.days_left, st.days_left == 1 and "" or "s")
+        sub  = "Everything is unlocked while the trial runs."
+    elseif st.reason == "stale" then
+        head = "License needs re-checking"
+        sub  = "Connect to the internet and press Activate."
+    elseif st.reason == "tampered" then
+        head = "License record unreadable"
+        sub  = "Enter your key again to restore it."
+    else
+        head = "Trial ended"
+        sub  = "Enter your license key to keep using " .. RC.PRODUCT_NAME .. "."
+    end
+
+    GUI.Val("lbl_lic_state", head)
+    GUI.Val("lbl_lic_sub",   sub)
+    if GUI.redraw_z then GUI.redraw_z[14] = true end
 end
 
 GUI.func = function()
-    local cur_tab      = GUI.elms.tabs.retval
+    -- Views keep the numbering the rest of this function was written
+    -- against, so folding Audio Types / UCS / Advanced under one Config tab
+    -- did not mean rewriting every branch.
+    --   1 Main   2 Audio Types   3 UCS   4 Render   5 Advanced
+    -- License gate. Pinning the tab is the whole lock: Tabs:val switches
+    -- the z-sets too, so every other pane hides itself. Checked every
+    -- frame, which is free because license_state caches for 5 seconds.
+    local lic = license_state()
+    if lic.status == "expired" and GUI.elms.tabs.retval ~= 4 then
+        GUI.Val("tabs", 4)
+    end
+
+    -- A background revalidation can revoke a licence while the window is
+    -- open, and the trial can run out mid-session. Either way the tab above
+    -- locks, so the text on it has to agree.
+    if lic.status ~= _prev_lic_status then
+        _prev_lic_status = lic.status
+        refresh_license()
+    end
+
+    local cur_tab = GUI.elms.tabs.retval        -- 1 Main, 2 Config, 3 Render
+    local cur_sub = GUI.elms.subtabs.retval     -- 1 Types, 2 UCS, 3 Advanced
+    local cur_view
+    if     cur_tab == 1  then cur_view = 1
+    elseif cur_tab == 3  then cur_view = 4
+    elseif cur_tab == 4  then cur_view = 6
+    elseif cur_sub == 2  then cur_view = 3
+    elseif cur_sub == 3  then cur_view = 5
+    else                      cur_view = 2 end
+
+    -- The Config panes are not in any tab set; this drives them.
+    GUI.elms_hide[3]  = (cur_view ~= 2)
+    GUI.elms_hide[4]  = (cur_view ~= 3)
+    GUI.elms_hide[11] = (cur_view ~= 5)
+    -- z=8 is in no tab set so it can float above Main, Config and Render;
+    -- that also means it would bleed onto the License tab unless hidden.
+    GUI.elms_hide[8]  = (cur_view == 6)
     local effective_idx = GUI.Val("sel_type")
 
     -- Themed dropdown: live hover redraw; close on outside click or tab change
     local dd = GUI.elms.rc_dropdown
     if dd.owner then
         if GUI.redraw_z then GUI.redraw_z[1] = true end
-        if cur_tab ~= _prev_tab then
+        if cur_view ~= _prev_view then
             dd:close()
         elseif GUI.mouse.down
             and not GUI.IsInside(dd, GUI.mouse.x, GUI.mouse.y)
@@ -1020,7 +1556,7 @@ GUI.func = function()
     end
 
     -- Save type edits (name/prefix/pattern) when leaving Audio Config
-    if _prev_tab == 2 and cur_tab ~= 2 then
+    if _prev_view == 2 and cur_view ~= 2 then
         RC.wildcard_template = GUI.Val("txt_pattern") or RC.wildcard_template
         local at = RC.audio_types[RC.selected_type_idx]
         if at then
@@ -1054,11 +1590,12 @@ GUI.func = function()
         end
         refresh_field_list()
         refresh_custom_fields()
-        if cur_tab == 3 then refresh_ucs_tab() end
+        refresh_ucs_toggle()
+        if cur_view == 3 then refresh_ucs_tab() end
     end
 
     -- Continuously sync type-specific fields to RC while on Main tab
-    local on_main = (cur_tab == 1)
+    local on_main = (cur_view == 1)
     if on_main then
         local type_name = RC.audio_types[RC.selected_type_idx]
             and RC.audio_types[RC.selected_type_idx].name or ""
@@ -1088,9 +1625,9 @@ GUI.func = function()
     GUI.elms_hide[6] = not (on_main and type_name == "Dialogue")
 
     -- UCS tab (tab 3)
-    local on_ucs = (cur_tab == 3)
+    local on_ucs = (cur_view == 3)
     if on_ucs then
-        if _prev_tab ~= 3 then refresh_ucs_tab() end
+        if _prev_view ~= 3 then refresh_ucs_tab() end
         local at = RC.audio_types[RC.selected_type_idx]
         if at then
             local cat_idx = GUI.Val("mnu_ucs_cat")
@@ -1111,17 +1648,7 @@ GUI.func = function()
                 _prev_ucs_sub_idx = sub_idx
             end
 
-            at.ucs_enabled  = GUI.Val("chk_ucs_enable") and true or false
             at.ucs_wildcard = GUI.Val("txt_ucs_pattern") or at.ucs_wildcard
-            -- First enable with no CatID picked yet: adopt the current selection
-            if at.ucs_enabled and (not at.ucs_catid or at.ucs_catid == "") then
-                local entry = _ucs_subs[GUI.Val("mnu_ucs_sub")]
-                if entry then
-                    at.ucs_catid = entry.id
-                    GUI.Val("lbl_ucs_catid", "CatID:  " .. entry.id)
-                end
-            end
-
             RC.ucs_creator_id = GUI.Val("txt_ucs_creator") or ""
             RC.ucs_source_id  = GUI.Val("txt_ucs_source")  or ""
             RC.ucs_user_data  = GUI.Val("txt_ucs_user")    or ""
@@ -1130,7 +1657,20 @@ GUI.func = function()
     end
 
     -- Render tab (tab 4)
-    local on_render = (cur_tab == 4)
+    local on_render = (cur_view == 4)
+
+    local has_regions = (RC.region_list and #RC.region_list > 0) or false
+    local has_checked = false
+    local chk_r = GUI.elms.chk_regions
+    if has_regions and chk_r and chk_r.optsel then
+        for i, sel in ipairs(chk_r.optsel) do
+            if sel and RC.region_list[i] then has_checked = true break end
+        end
+    end
+    GUI.elms_hide[9]  = not (on_render and has_regions)
+    GUI.elms_hide[12] = not (on_render and has_checked)
+    if on_render then layout_render_tab(has_regions, has_checked) end
+
     if on_render then
         RC.render_base_dir  = GUI.Val("txt_base_dir") or ""
         RC.render_engine    = (GUI.Val("mnu_engine") == 2) and "reaper" or "direct"
@@ -1140,29 +1680,58 @@ GUI.func = function()
         if at then
             at.path_pattern = GUI.Val("txt_rpath") or at.path_pattern
         end
-        if _prev_tab ~= 4 then populate_region_checklist() end
+        if _prev_view ~= 4 then populate_region_checklist() end
         if RC.render_status ~= _prev_render_status then
             GUI.Val("lbl_render_status", RC.render_status)
             _prev_render_status = RC.render_status
         end
     end
 
+    -- Advanced tab (tab 5)
+    if cur_view == 5 then
+        RC.gap_length = tonumber(GUI.Val("txt_gap")) or RC.gap_length
+        if _prev_view ~= 5 then
+            -- The project dictionary lives in ProjExtState, so re-read it in
+            -- case the user switched project tab since we last looked.
+            wildcard_dict_load()
+            refresh_wildcard_list()
+            refresh_cluster_labels()
+            _prev_ovr_track = false      -- force one summary refresh below
+        end
+        -- Reading a track's overrides means four P_EXT lookups and a
+        -- redraw, so only do it when the selection actually changed.
+        local ovr_sel = reaper.GetSelectedTrack(0, 0)
+        if ovr_sel ~= _prev_ovr_track then
+            refresh_track_overrides()
+            _prev_ovr_track = ovr_sel
+        end
+    end
+
     local sc      = reaper.GetProjectStateChangeCount(0)
     local cur_sel = reaper.GetSelectedTrack(0, 0)
-    if sc ~= _prev_state_count or cur_sel ~= _prev_sel_track then
+    -- In Auto mode the item selection decides what gets built, so the
+    -- region count has to react to it and not only to track selection.
+    local item_n   = reaper.CountSelectedMediaItems(0)
+    local item_one = item_n > 0 and reaper.GetSelectedMediaItem(0, 0) or nil
+
+    if sc ~= _prev_state_count or cur_sel ~= _prev_sel_track
+        or item_n ~= _prev_item_count or item_one ~= _prev_item_first then
         refresh_tree_view()
         _prev_state_count = sc
         _prev_sel_track   = cur_sel
+        _prev_item_count  = item_n
+        _prev_item_first  = item_one
     end
 
     _prev_type_idx = effective_idx
-    _prev_tab      = cur_tab
+    _prev_view      = cur_view
 end
 
 GUI.freq = 0
 
 GUI.exit = function()
     direct_render_abort()
+    preview_clear()
 
     RC.render_base_dir    = GUI.Val("txt_base_dir")         or RC.render_base_dir
     RC.render_engine      = (GUI.Val("mnu_engine") == 2) and "reaper" or "direct"
@@ -1193,6 +1762,13 @@ GUI.exit = function()
     save_settings({
         render_base_dir   = RC.render_base_dir,
         render_engine     = RC.render_engine,
+        render_keep_regions = RC.render_keep_regions,
+        cluster_enabled     = RC.cluster_enabled,
+        gap_length          = RC.gap_length,
+        gap_use_beat        = RC.gap_use_beat,
+        number_single_files = RC.number_single_files,
+        warn_overwrite      = RC.warn_overwrite,
+        always_track_mode   = RC.always_track_mode,
         direct_bit_depth  = RC.direct_bit_depth,
         direct_srate      = RC.direct_srate,
         ucs_creator_id    = RC.ucs_creator_id,
@@ -1210,7 +1786,7 @@ GUI.exit = function()
     save_audio_types(RC.audio_types)
 end
 
--- ── Entry point called by the controller ────────────────────────────
+-- Entry point called by the controller
 function gui_start()
     local function script()
         GUI.Init()
@@ -1242,16 +1818,28 @@ function gui_start()
         refresh_custom_fields()
 
         GUI.Val("lbl_render_status", RC.render_status)
+        GUI.Val("txt_gap", tostring(RC.gap_length))
+        refresh_cluster_labels()
+        refresh_wildcard_list()
+        refresh_track_overrides()
+        refresh_ucs_toggle()
+        refresh_license()
 
         -- z=8 (audio type header) not in any set → always visible
-        GUI.elms.tabs:update_sets({ {2, 10}, {3}, {4}, {7, 9} })
+        -- z 9 and 12 are managed by layout_render_tab, like 5 and 6 on Main
+        GUI.elms.tabs:update_sets({ {2, 10}, {13}, {7}, {14} })
         GUI.elms_hide[5] = true
         GUI.elms_hide[6] = true
 
         _prev_type_idx      = RC.selected_type_idx
         _prev_render_status = RC.render_status
+        _prev_lic_status    = license_state().status
         refresh_ucs_tab()
         refresh_tree_view()
+
+        -- After the window is scheduled, so a slow network call can never
+        -- delay it opening.
+        license_tick()
 
         reaper.defer(GUI.Main)
     end

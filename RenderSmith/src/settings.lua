@@ -38,6 +38,13 @@ RC.dx_quest_name      = s.dx_quest_name
 RC.dx_line_number     = s.dx_line_number
 RC.render_base_dir    = s.render_base_dir
 RC.render_engine      = s.render_engine
+RC.render_keep_regions = s.render_keep_regions
+RC.cluster_enabled     = s.cluster_enabled
+RC.gap_length          = s.gap_length
+RC.gap_use_beat        = s.gap_use_beat
+RC.number_single_files = s.number_single_files
+RC.warn_overwrite      = s.warn_overwrite
+RC.always_track_mode   = s.always_track_mode
 RC.direct_bit_depth   = s.direct_bit_depth
 RC.direct_srate       = s.direct_srate
 RC.ucs_creator_id     = s.ucs_creator_id
@@ -67,8 +74,6 @@ RC.slider_ranges = {
     fadeout  = { min = 0.0, max = 1.0  },
 }
 
-RC.region_hierarchy_data = {}
-
 -- Safety net: fill any RC field that could be nil due to corrupted ExtState,
 -- module load order changes, or missing keys added in future versions.
 local function ensure_rc_complete()
@@ -83,7 +88,7 @@ local function ensure_rc_complete()
     if RC.dx_quest_name      == nil then RC.dx_quest_name      = d.dx_quest_name      end
     if RC.dx_line_number     == nil then RC.dx_line_number     = d.dx_line_number     end
     if RC.valid_tracks       == nil then RC.valid_tracks       = {}                   end
-    if RC.region_hierarchy_data == nil then RC.region_hierarchy_data = {}             end
+    if RC.region_meta           == nil then RC.region_meta           = {}             end
     if RC.audio_types        == nil then RC.audio_types        = RC.default_audio_types end
     if RC.selected_type_idx  == nil then RC.selected_type_idx  = 1                   end
     if RC.random_params      == nil then
@@ -104,6 +109,13 @@ local function ensure_rc_complete()
     if RC.render_mode      == nil then RC.render_mode      = 1        end
     if RC.render_base_dir  == nil then RC.render_base_dir  = ""       end
     if RC.render_engine    == nil then RC.render_engine    = d.render_engine    end
+    if RC.render_keep_regions == nil then RC.render_keep_regions = d.render_keep_regions end
+    if RC.cluster_enabled     == nil then RC.cluster_enabled     = d.cluster_enabled     end
+    if RC.gap_length          == nil then RC.gap_length          = d.gap_length          end
+    if RC.gap_use_beat        == nil then RC.gap_use_beat        = d.gap_use_beat        end
+    if RC.number_single_files == nil then RC.number_single_files = d.number_single_files end
+    if RC.warn_overwrite      == nil then RC.warn_overwrite      = d.warn_overwrite      end
+    if RC.always_track_mode   == nil then RC.always_track_mode   = d.always_track_mode   end
     if RC.direct_bit_depth == nil then RC.direct_bit_depth = d.direct_bit_depth end
     if RC.direct_srate     == nil then RC.direct_srate     = d.direct_srate     end
     if RC.ucs_creator_id   == nil then RC.ucs_creator_id   = ""       end
